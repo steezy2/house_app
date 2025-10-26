@@ -1,0 +1,13 @@
+# Test coverage files
+/coverage.html
+/coverage.out
+
+# Environment files
+/.env
+
+# Binary files
+/house_app
+/house_app.exe
+
+# Uploads directory
+/uploads/

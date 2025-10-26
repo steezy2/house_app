@@ -1,0 +1,137 @@
+basePath: /api/v1
+definitions:
+  models.BulkUploadRequest:
+    properties:
+      sourceFolder:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+    type: object
+  models.BulkUploadResponse:
+    properties:
+      failedCount:
+        type: integer
+      failedFiles:
+        items:
+          type: string
+        type: array
+      successfulCount:
+        type: integer
+      totalImages:
+        type: integer
+    type: object
+  models.Image:
+    properties:
+      contentType:
+        type: string
+      createdAt:
+        type: string
+      filename:
+        type: string
+      id:
+        type: string
+      metadata: {}
+      originalPath:
+        type: string
+      size:
+        type: integer
+      storagePath:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: API for house management including image and file storage.
+  title: House App API
+  version: "1.0"
+paths:
+  /images:
+    get:
+      description: Get a list of all images
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Image'
+            type: array
+      summary: Get all images
+      tags:
+      - images
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload a single image file
+      parameters:
+      - description: Image file to upload
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Comma-separated tags
+        in: formData
+        name: tags
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.Image'
+      summary: Upload a single image
+      tags:
+      - images
+  /images/bulk-upload:
+    post:
+      consumes:
+      - application/json
+      description: Upload multiple images from a specified folder path
+      parameters:
+      - description: Bulk upload request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/models.BulkUploadRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.BulkUploadResponse'
+      summary: Bulk upload images from a source folder
+      tags:
+      - images
+  /images/search:
+    get:
+      description: Search for images by filename or tags. Requires a text index on
+        the collection.
+      parameters:
+      - description: Search query
+        in: query
+        name: q
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Image'
+            type: array
+      summary: Search images
+      tags:
+      - images
+swagger: "2.0"
