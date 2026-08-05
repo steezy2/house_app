@@ -36,6 +36,26 @@ func TestMongoRepo_CreateImage(t *testing.T) {
 	})
 }
 
+func TestMongoRepo_UpdateImagePath(t *testing.T) {
+	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
+	defer mt.Close()
+
+	mt.Run("success", func(mt *mtest.T) {
+		repo := &MongoRepo{collection: mt.Coll}
+
+		mt.AddMockResponses(bson.D{
+			{Key: "ok", Value: 1},
+			{Key: "n", Value: 1},
+			{Key: "nModified", Value: 1},
+		})
+
+		err := repo.UpdateImagePath("./uploads/photo.jpg", "E:/house_app_storage/2025/10/travel/travel_photo.jpg", "travel")
+		if err != nil {
+			t.Errorf("UpdateImagePath failed: %v", err)
+		}
+	})
+}
+
 func TestMongoRepo_GetImages(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 	defer mt.Close()

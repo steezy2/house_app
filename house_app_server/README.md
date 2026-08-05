@@ -26,10 +26,13 @@ This is the backend server for the House App. It is a Go application that provid
     go mod download
     ```
 
-2.  Create a `.env` file in the root directory with the following content:
+2.  Create a `.env` file in this directory (copy `.env.example`). At
+    minimum set `MONGO_URI`; also set `API_KEY` if you want the API to
+    require authentication (recommended — see below):
 
     ```env
     MONGO_URI=mongodb://localhost:27017
+    API_KEY=some-shared-secret
     ```
 
 ### Running the Server
@@ -81,11 +84,26 @@ make go-test-html
 ### Images
 
 - `POST /api/v1/images` - Upload a single image
+- `POST /api/v1/images/multiple` - Upload multiple image files in one multipart request
 - `GET /api/v1/images` - Get all images
 - `GET /api/v1/images/search?q=query` - Search images
-- `POST /api/v1/images/bulk-upload` - Bulk upload images from a folder
+- `POST /api/v1/images/bulk-upload` - Bulk copy images from a folder path the server can read
 
 For detailed API documentation, see the Swagger UI when the server is running.
+
+All `/api/v1/*` requests above require an `X-API-Key` header matching
+`API_KEY` if that variable is set — see
+[../README.md#authentication](../README.md#authentication). `/swagger/*`
+is not gated.
+
+## Background Processing
+
+A separate `processor/` package (started from `main.go`, not from the
+`controller` package above) polls `UPLOAD_DIR` on a timer, moves files
+into `STORAGE_DIR/YYYY/MM/category/`, and updates each image's database
+record to the new path. See [../IMAGE_PROCESSING.md](../IMAGE_PROCESSING.md)
+for configuration and [../README.md#future-enhancements](../README.md#future-enhancements)
+for remaining known gaps (e.g. AI categorization is still a stub).
 
 ## Building
 
@@ -101,7 +119,7 @@ Or with Make:
 make build
 ```
 
-This will create a `coverage.html` file in the root of the `bookmark_server` directory.
+This will create a `coverage.html` file in the root of the `house_app_server` directory.
 
 ## Development
 

@@ -15,8 +15,10 @@ type Image struct {
 	Size         int64              `bson:"size" json:"size"`
 	ContentType  string             `bson:"contentType" json:"contentType"`
 	Tags         []string           `bson:"tags,omitempty" json:"tags,omitempty"`
+	Category     string             `bson:"category,omitempty" json:"category,omitempty"`
 	Metadata     interface{}        `bson:"metadata,omitempty" json:"metadata,omitempty"`
 	CreatedAt    time.Time          `bson:"createdAt" json:"createdAt"`
+	ProcessedAt  time.Time          `bson:"processedAt,omitempty" json:"processedAt,omitempty"`
 }
 
 // BulkUploadRequest represents the request body for bulk image upload

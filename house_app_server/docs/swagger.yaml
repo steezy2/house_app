@@ -112,6 +112,32 @@ paths:
       summary: Bulk upload images from a source folder
       tags:
       - images
+  /images/multiple:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload multiple image files at once from a mobile device or web
+        browser
+      parameters:
+      - description: Image files to upload (select multiple)
+        in: formData
+        name: files
+        required: true
+        type: file
+      - description: Comma-separated tags for all images
+        in: formData
+        name: tags
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.BulkUploadResponse'
+      summary: Upload multiple images
+      tags:
+      - images
   /images/search:
     get:
       description: Search for images by filename or tags. Requires a text index on

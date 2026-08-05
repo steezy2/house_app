@@ -17,10 +17,11 @@ import (
 
 // MockImageRepository is a mock of ImageRepository
 type MockImageRepository struct {
-	CreateImageFunc  func(models.Image) (*mongo.InsertOneResult, error)
-	GetImagesFunc    func() ([]models.Image, error)
-	SearchImagesFunc func(string) ([]models.Image, error)
-	CreateImagesFunc func([]models.Image) (*mongo.InsertManyResult, error)
+	CreateImageFunc     func(models.Image) (*mongo.InsertOneResult, error)
+	GetImagesFunc       func() ([]models.Image, error)
+	SearchImagesFunc    func(string) ([]models.Image, error)
+	CreateImagesFunc    func([]models.Image) (*mongo.InsertManyResult, error)
+	UpdateImagePathFunc func(oldStoragePath, newStoragePath, category string) error
 }
 
 func (m *MockImageRepository) CreateImage(img models.Image) (*mongo.InsertOneResult, error) {
@@ -39,8 +40,16 @@ func (m *MockImageRepository) CreateImages(imgs []models.Image) (*mongo.InsertMa
 	return m.CreateImagesFunc(imgs)
 }
 
+func (m *MockImageRepository) UpdateImagePath(oldStoragePath, newStoragePath, category string) error {
+	if m.UpdateImagePathFunc == nil {
+		return nil
+	}
+	return m.UpdateImagePathFunc(oldStoragePath, newStoragePath, category)
+}
+
 func TestAPIServer_GetImages(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	t.Setenv("API_KEY", "")
 
 	expectedImages := []models.Image{
 		{
@@ -64,7 +73,7 @@ func TestAPIServer_GetImages(t *testing.T) {
 	mockService := service.NewService(mockRepo)
 	server := NewAPIServer(mockService)
 
-	req, _ := http.NewRequest(http.MethodGet, "/api/v1/images/", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/images", nil)
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
 
@@ -85,6 +94,7 @@ func TestAPIServer_GetImages(t *testing.T) {
 
 func TestAPIServer_BulkUploadImages(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	t.Setenv("API_KEY", "")
 
 	mockRepo := &MockImageRepository{
 		CreateImageFunc: func(img models.Image) (*mongo.InsertOneResult, error) {
@@ -110,5 +120,76 @@ func TestAPIServer_BulkUploadImages(t *testing.T) {
 	// Should fail because folder doesn't exist
 	if w.Code != http.StatusInternalServerError {
 		t.Logf("Response: %s", w.Body.String())
+	}
+}
+
+func TestAPIServer_RejectsRequestsWithoutAPIKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("API_KEY", "secret-key")
+
+	mockService := service.NewService(&MockImageRepository{})
+	server := NewAPIServer(mockService)
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/images", nil)
+	w := httptest.NewRecorder()
+	server.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status code %d without an API key, but got %d", http.StatusUnauthorized, w.Code)
+	}
+}
+
+func TestAPIServer_RejectsWrongAPIKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("API_KEY", "secret-key")
+
+	mockService := service.NewService(&MockImageRepository{})
+	server := NewAPIServer(mockService)
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/images", nil)
+	req.Header.Set("X-API-Key", "wrong-key")
+	w := httptest.NewRecorder()
+	server.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status code %d with a wrong API key, but got %d", http.StatusUnauthorized, w.Code)
+	}
+}
+
+func TestAPIServer_AcceptsValidAPIKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("API_KEY", "secret-key")
+
+	mockRepo := &MockImageRepository{
+		GetImagesFunc: func() ([]models.Image, error) {
+			return []models.Image{}, nil
+		},
+	}
+	mockService := service.NewService(mockRepo)
+	server := NewAPIServer(mockService)
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/images", nil)
+	req.Header.Set("X-API-Key", "secret-key")
+	w := httptest.NewRecorder()
+	server.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status code %d with a valid API key, but got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestAPIServer_SwaggerBypassesAPIKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("API_KEY", "secret-key")
+
+	mockService := service.NewService(&MockImageRepository{})
+	server := NewAPIServer(mockService)
+
+	req, _ := http.NewRequest(http.MethodGet, "/swagger/index.html", nil)
+	w := httptest.NewRecorder()
+	server.router.ServeHTTP(w, req)
+
+	if w.Code == http.StatusUnauthorized {
+		t.Errorf("Swagger UI should not require an API key, got %d", w.Code)
 	}
 }

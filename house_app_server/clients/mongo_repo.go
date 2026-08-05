@@ -2,7 +2,7 @@ package clients
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -23,22 +23,25 @@ type MongoRepo struct {
 func NewMongoRepo() (*MongoRepo, error) {
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI == "" {
-		log.Fatal("MONGO_URI environment variable not set")
+		slog.Error("MONGO_URI environment variable not set")
+		os.Exit(1)
 	}
 
 	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(mongoURI))
 	if err != nil {
+		slog.Error("Failed to connect to MongoDB", "error", err, "uri", mongoURI)
 		return nil, err
 	}
 
 	dbName := "house_app"
 	collectionName := "images"
 	db := client.Database(dbName)
-	log.Printf("Connected to MongoDB and using database '%s'", dbName)
+	slog.Info("Connected to MongoDB", "database", dbName)
 
 	// Check if the collection exists
 	collections, err := db.ListCollectionNames(context.Background(), bson.M{"name": collectionName})
 	if err != nil {
+		slog.Error("Failed to list collections", "error", err, "database", dbName)
 		return nil, err
 	}
 
@@ -51,14 +54,15 @@ func NewMongoRepo() (*MongoRepo, error) {
 	}
 
 	if !collectionExists {
-		log.Printf("Collection '%s' does not exist, creating it...", collectionName)
+		slog.Info("Collection does not exist, creating it", "collection", collectionName)
 		err := db.CreateCollection(context.Background(), collectionName)
 		if err != nil {
+			slog.Error("Failed to create collection", "error", err, "collection", collectionName)
 			return nil, err
 		}
-		log.Printf("Collection '%s' created successfully.", collectionName)
+		slog.Info("Collection created successfully", "collection", collectionName)
 	} else {
-		log.Printf("Collection '%s' already exists.", collectionName)
+		slog.Info("Collection already exists", "collection", collectionName)
 	}
 
 	collection := db.Collection(collectionName)
@@ -107,6 +111,23 @@ func (r *MongoRepo) SearchImages(query string) ([]models.Image, error) {
 		return nil, err
 	}
 	return images, nil
+}
+
+// UpdateImagePath updates the storagePath, category, and processedAt of the
+// image record whose storagePath currently equals oldStoragePath. It is a
+// no-op (no error) if no record matches, since the processor may retry or
+// the record may already have been updated.
+func (r *MongoRepo) UpdateImagePath(oldStoragePath, newStoragePath, category string) error {
+	filter := bson.M{"storagePath": oldStoragePath}
+	update := bson.M{
+		"$set": bson.M{
+			"storagePath": newStoragePath,
+			"category":    category,
+			"processedAt": time.Now(),
+		},
+	}
+	_, err := r.collection.UpdateOne(context.Background(), filter, update)
+	return err
 }
 
 // CreateImages creates multiple new image records in the database.

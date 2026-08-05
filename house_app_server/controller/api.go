@@ -1,7 +1,10 @@
 package controller
 
 import (
+	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
 
 	"house-app/models"
 	"house-app/service"
@@ -20,21 +23,66 @@ type APIServer struct {
 	router  *gin.Engine
 }
 
+// CORSMiddleware handles CORS headers
+func CORSMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// APIKeyMiddleware requires a matching X-API-Key header on every request
+// when apiKey is non-empty. If apiKey is empty, auth is disabled — useful
+// for local development, but NewAPIServer logs a loud warning when that
+// happens so it isn't left that way by accident.
+func APIKeyMiddleware(apiKey string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if apiKey == "" {
+			c.Next()
+			return
+		}
+		if c.GetHeader("X-API-Key") != apiKey {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid X-API-Key header"})
+			return
+		}
+		c.Next()
+	}
+}
+
 // NewAPIServer creates a new API server
 func NewAPIServer(service *service.Service) *APIServer {
 	router := gin.Default()
+
+	// Add CORS middleware
+	router.Use(CORSMiddleware())
 
 	s := &APIServer{
 		service: service,
 		router:  router,
 	}
 
+	apiKey := os.Getenv("API_KEY")
+	if apiKey == "" {
+		slog.Warn("API_KEY not set — all /api/v1 endpoints are unauthenticated. Set API_KEY to require an X-API-Key header.")
+	}
+
 	v1 := router.Group("/api/v1")
+	v1.Use(APIKeyMiddleware(apiKey))
 	{
 		images := v1.Group("/images")
 		{
-			images.POST("/", s.UploadImage)
-			images.GET("/", s.GetImages)
+			images.POST("", s.UploadImage)
+			images.POST("/multiple", s.UploadMultipleImages)
+			images.GET("", s.GetImages)
 			images.GET("/search", s.SearchImages)
 			images.POST("/bulk-upload", s.BulkUploadImages)
 		}
@@ -62,27 +110,81 @@ func (s *APIServer) Run(addr string) {
 // @Success 201 {object} models.Image
 // @Router /images [post]
 func (s *APIServer) UploadImage(c *gin.Context) {
+	slog.Info("Received image upload request")
 	file, err := c.FormFile("file")
 	if err != nil {
+		slog.Error("Failed to get file from form", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No file provided"})
 		return
 	}
 
-	// Parse tags if provided
-	tagsStr := c.PostForm("tags")
-	var tags []string
-	if tagsStr != "" {
-		// Simple comma-separated parsing
-		tags = []string{tagsStr}
-	}
+	tags := service.ParseTags(c.PostForm("tags"))
 
 	image, err := s.service.UploadImage(file, tags)
 	if err != nil {
+		slog.Error("Failed to upload image", "filename", file.Filename, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
+	slog.Info("Image uploaded successfully", "filename", file.Filename, "id", image.ID)
 	c.JSON(http.StatusCreated, image)
+}
+
+// UploadMultipleImages godoc
+// @Summary Upload multiple images
+// @Description Upload multiple image files at once from a mobile device or web browser
+// @Tags images
+// @Accept  multipart/form-data
+// @Produce  json
+// @Param files formData file true "Image files to upload (select multiple)"
+// @Param tags formData string false "Comma-separated tags for all images"
+// @Success 200 {object} models.BulkUploadResponse
+// @Router /images/multiple [post]
+func (s *APIServer) UploadMultipleImages(c *gin.Context) {
+	slog.Info("Received multiple images upload request")
+
+	// Get the multipart form
+	form, err := c.MultipartForm()
+	if err != nil {
+		slog.Error("Failed to get multipart form", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid multipart form"})
+		return
+	}
+
+	files := form.File["files"]
+	if len(files) == 0 {
+		slog.Error("No files provided in upload")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No files provided"})
+		return
+	}
+
+	tags := service.ParseTags(c.PostForm("tags"))
+
+	successful := 0
+	failed := 0
+	var errors []string
+
+	for _, fileHeader := range files {
+		image, err := s.service.UploadImage(fileHeader, tags)
+		if err != nil {
+			slog.Error("Failed to upload image", "filename", fileHeader.Filename, "error", err)
+			errors = append(errors, fmt.Sprintf("%s: %s", fileHeader.Filename, err.Error()))
+			failed++
+		} else {
+			slog.Info("Image uploaded successfully", "filename", fileHeader.Filename, "id", image.ID)
+			successful++
+		}
+	}
+
+	response := models.BulkUploadResponse{
+		TotalImages:     len(files),
+		SuccessfulCount: successful,
+		FailedCount:     failed,
+		FailedFiles:     errors,
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // GetImages godoc
@@ -95,6 +197,7 @@ func (s *APIServer) UploadImage(c *gin.Context) {
 func (s *APIServer) GetImages(c *gin.Context) {
 	images, err := s.service.GetImages()
 	if err != nil {
+		slog.Error("Failed to fetch images", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching images"})
 		return
 	}
@@ -118,6 +221,7 @@ func (s *APIServer) SearchImages(c *gin.Context) {
 
 	images, err := s.service.SearchImages(query)
 	if err != nil {
+		slog.Error("Failed to search images", "query", query, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error searching images"})
 		return
 	}
@@ -137,6 +241,7 @@ func (s *APIServer) SearchImages(c *gin.Context) {
 func (s *APIServer) BulkUploadImages(c *gin.Context) {
 	var req models.BulkUploadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		slog.Error("Failed to parse bulk upload request", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -146,11 +251,17 @@ func (s *APIServer) BulkUploadImages(c *gin.Context) {
 		return
 	}
 
+	slog.Info("Starting bulk upload", "sourceFolder", req.SourceFolder, "tags", req.Tags)
 	result, err := s.service.BulkUploadImages(req.SourceFolder, req.Tags)
 	if err != nil {
+		slog.Error("Bulk upload failed", "sourceFolder", req.SourceFolder, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
+	slog.Info("Bulk upload completed",
+		"totalImages", result.TotalImages,
+		"successfulCount", result.SuccessfulCount,
+		"failedCount", result.FailedCount)
 	c.JSON(http.StatusOK, result)
 }

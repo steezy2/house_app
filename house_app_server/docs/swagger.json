@@ -102,6 +102,44 @@
                 }
             }
         },
+        "/images/multiple": {
+            "post": {
+                "description": "Upload multiple image files at once from a mobile device or web browser",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "images"
+                ],
+                "summary": "Upload multiple images",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Image files to upload (select multiple)",
+                        "name": "files",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated tags for all images",
+                        "name": "tags",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.BulkUploadResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/images/search": {
             "get": {
                 "description": "Search for images by filename or tags. Requires a text index on the collection.",
