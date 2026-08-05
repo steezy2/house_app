@@ -4,6 +4,7 @@ import 'package:http/testing.dart';
 import 'package:house_app_mobile/api/api_client.dart';
 
 import '../fakes/fake_settings_storage.dart';
+import '../test_helpers.dart';
 
 void main() {
   group('ApiClient', () {
@@ -22,9 +23,7 @@ void main() {
     });
 
     test('sends the configured X-API-Key header to the configured URL', () async {
-      final storage = FakeSettingsStorage();
-      await storage.writeBaseUrl('http://192.168.1.23:8080');
-      await storage.writeApiKey('secret-key');
+      final storage = await configuredStorage(apiKey: 'secret-key');
       late http.Request captured;
       final client = ApiClient(
         httpClient: MockClient((request) async {
@@ -44,8 +43,7 @@ void main() {
     });
 
     test('omits X-API-Key when no key is configured', () async {
-      final storage = FakeSettingsStorage();
-      await storage.writeBaseUrl('http://192.168.1.23:8080');
+      final storage = await configuredStorage();
       late http.Request captured;
       final client = ApiClient(
         httpClient: MockClient((request) async {
@@ -61,8 +59,7 @@ void main() {
     });
 
     test('applies query parameters', () async {
-      final storage = FakeSettingsStorage();
-      await storage.writeBaseUrl('http://192.168.1.23:8080');
+      final storage = await configuredStorage();
       late http.Request captured;
       final client = ApiClient(
         httpClient: MockClient((request) async {
@@ -78,8 +75,7 @@ void main() {
     });
 
     test('throws ApiException with the server message on failure', () async {
-      final storage = FakeSettingsStorage();
-      await storage.writeBaseUrl('http://192.168.1.23:8080');
+      final storage = await configuredStorage();
       final client = ApiClient(
         httpClient: MockClient(
           (request) async => http.Response(
@@ -105,8 +101,7 @@ void main() {
     });
 
     test('falls back to a generic message when the body has none', () async {
-      final storage = FakeSettingsStorage();
-      await storage.writeBaseUrl('http://192.168.1.23:8080');
+      final storage = await configuredStorage();
       final client = ApiClient(
         httpClient: MockClient((request) async => http.Response('', 500)),
         settingsStorage: storage,

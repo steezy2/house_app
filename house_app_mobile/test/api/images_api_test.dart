@@ -8,13 +8,12 @@ import 'package:house_app_mobile/api/api_client.dart';
 import 'package:house_app_mobile/api/images_api.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../fakes/fake_settings_storage.dart';
+import '../test_helpers.dart';
 
 void main() {
   group('ImagesApi.getImages', () {
     test('decodes the bare JSON array the server returns', () async {
-      final storage = FakeSettingsStorage();
-      await storage.writeBaseUrl('http://192.168.1.23:8080');
+      final storage = await configuredStorage();
       final client = ApiClient(
         httpClient: MockClient(
           (request) async => http.Response(
@@ -53,9 +52,7 @@ void main() {
         final file2 = File('${tempDir.path}/b.jpg')
           ..writeAsBytesSync([4, 5, 6]);
 
-        final storage = FakeSettingsStorage();
-        await storage.writeBaseUrl('http://192.168.1.23:8080');
-        await storage.writeApiKey('secret-key');
+        final storage = await configuredStorage(apiKey: 'secret-key');
 
         late http.BaseRequest captured;
         final client = ApiClient(
@@ -95,8 +92,7 @@ void main() {
 
     test('omits the tags field when no tags are given', () async {
       final file = File('${tempDir.path}/a.jpg')..writeAsBytesSync([1]);
-      final storage = FakeSettingsStorage();
-      await storage.writeBaseUrl('http://192.168.1.23:8080');
+      final storage = await configuredStorage();
 
       late http.BaseRequest captured;
       final client = ApiClient(

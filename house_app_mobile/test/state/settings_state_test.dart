@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:house_app_mobile/state/settings_state.dart';
 
 import '../fakes/fake_settings_storage.dart';
+import '../test_helpers.dart';
 
 void main() {
   group('SettingsState', () {
@@ -16,9 +17,7 @@ void main() {
     });
 
     test('hydrate loads previously saved values', () async {
-      final storage = FakeSettingsStorage();
-      await storage.writeBaseUrl('http://192.168.1.23:8080');
-      await storage.writeApiKey('secret');
+      final storage = await configuredStorage(apiKey: 'secret');
       final state = SettingsState(storage);
 
       await state.hydrate();

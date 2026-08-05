@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"testing"
 
+	"house-app/internal/mocks"
 	"house-app/models"
 
 	"go.mongodb.org/mongo-driver/mongo"
@@ -44,40 +45,8 @@ func newTestFileHeader(t *testing.T, filename string, content []byte) *multipart
 	return req.MultipartForm.File["file"][0]
 }
 
-// MockImageRepository is a mock of ImageRepository
-type MockImageRepository struct {
-	CreateImageFunc     func(models.Image) (*mongo.InsertOneResult, error)
-	GetImagesFunc       func() ([]models.Image, error)
-	SearchImagesFunc    func(string) ([]models.Image, error)
-	CreateImagesFunc    func([]models.Image) (*mongo.InsertManyResult, error)
-	UpdateImagePathFunc func(oldStoragePath, newStoragePath, category string) error
-}
-
-func (m *MockImageRepository) CreateImage(img models.Image) (*mongo.InsertOneResult, error) {
-	return m.CreateImageFunc(img)
-}
-
-func (m *MockImageRepository) GetImages() ([]models.Image, error) {
-	return m.GetImagesFunc()
-}
-
-func (m *MockImageRepository) SearchImages(q string) ([]models.Image, error) {
-	return m.SearchImagesFunc(q)
-}
-
-func (m *MockImageRepository) CreateImages(imgs []models.Image) (*mongo.InsertManyResult, error) {
-	return m.CreateImagesFunc(imgs)
-}
-
-func (m *MockImageRepository) UpdateImagePath(oldStoragePath, newStoragePath, category string) error {
-	if m.UpdateImagePathFunc == nil {
-		return nil
-	}
-	return m.UpdateImagePathFunc(oldStoragePath, newStoragePath, category)
-}
-
 func TestService_CreateImage(t *testing.T) {
-	mockRepo := &MockImageRepository{
+	mockRepo := &mocks.ImageRepository{
 		CreateImageFunc: func(img models.Image) (*mongo.InsertOneResult, error) {
 			return &mongo.InsertOneResult{}, nil
 		},
@@ -108,7 +77,7 @@ func TestService_GetImages(t *testing.T) {
 		{Filename: "image2.png"},
 	}
 
-	mockRepo := &MockImageRepository{
+	mockRepo := &mocks.ImageRepository{
 		GetImagesFunc: func() ([]models.Image, error) {
 			return expectedImages, nil
 		},
@@ -152,7 +121,7 @@ func TestParseTags(t *testing.T) {
 func TestService_UploadImage_RejectsUnsupportedExtension(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll("./uploads") })
 
-	svc := NewService(&MockImageRepository{})
+	svc := NewService(&mocks.ImageRepository{})
 	file := newTestFileHeader(t, "malware.exe", []byte("not an image"))
 
 	_, err := svc.UploadImage(file, nil)
@@ -165,7 +134,7 @@ func TestService_UploadImage_SanitizesFilename(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll("./uploads") })
 
 	var created models.Image
-	mockRepo := &MockImageRepository{
+	mockRepo := &mocks.ImageRepository{
 		CreateImageFunc: func(img models.Image) (*mongo.InsertOneResult, error) {
 			created = img
 			return &mongo.InsertOneResult{}, nil

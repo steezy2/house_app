@@ -245,6 +245,34 @@ func (p *ImageProcessor) categorizeWithAI(imagePath string, metadata *ImageMetad
 	return category, nil
 }
 
+// keywordCategories drives callOpenAIVision's fallback categorization. It's
+// an ordered slice, not a map: Go randomizes map iteration order, and a
+// filename can match more than one keyword (e.g. "beach_sunset.jpg" matches
+// both "beach" and "sunset") — this makes the first match in list order
+// win, deterministically, instead of picking a different category each run.
+var keywordCategories = []struct {
+	keyword  string
+	category string
+}{
+	{"vacation", "travel"},
+	{"holiday", "travel"},
+	{"trip", "travel"},
+	{"beach", "travel"},
+	{"mountain", "nature"},
+	{"landscape", "nature"},
+	{"sunset", "nature"},
+	{"sunrise", "nature"},
+	{"portrait", "people"},
+	{"family", "family"},
+	{"wedding", "events"},
+	{"birthday", "events"},
+	{"party", "events"},
+	{"food", "food"},
+	{"recipe", "food"},
+	{"screenshot", "screenshots"},
+	{"document", "documents"},
+}
+
 // callOpenAIVision calls OpenAI Vision API to categorize the image
 func (p *ImageProcessor) callOpenAIVision(imagePath string) (string, error) {
 	// Placeholder for OpenAI Vision API integration
@@ -253,30 +281,9 @@ func (p *ImageProcessor) callOpenAIVision(imagePath string) (string, error) {
 
 	filename := strings.ToLower(filepath.Base(imagePath))
 
-	// Simple keyword-based categorization as fallback
-	keywords := map[string]string{
-		"vacation":   "travel",
-		"holiday":    "travel",
-		"trip":       "travel",
-		"beach":      "travel",
-		"mountain":   "nature",
-		"landscape":  "nature",
-		"sunset":     "nature",
-		"sunrise":    "nature",
-		"portrait":   "people",
-		"family":     "family",
-		"wedding":    "events",
-		"birthday":   "events",
-		"party":      "events",
-		"food":       "food",
-		"recipe":     "food",
-		"screenshot": "screenshots",
-		"document":   "documents",
-	}
-
-	for keyword, category := range keywords {
-		if strings.Contains(filename, keyword) {
-			return category, nil
+	for _, kc := range keywordCategories {
+		if strings.Contains(filename, kc.keyword) {
+			return kc.category, nil
 		}
 	}
 
@@ -387,19 +394,10 @@ func (p *ImageProcessor) updateDatabaseRecord(oldPath, newPath, category string)
 	return nil
 }
 
-// isImageFile checks if a file extension is an image
+// isImageFile checks if a file extension is a supported image type. ext is
+// expected to already be lowercased (see ProcessAllImages).
 func isImageFile(ext string) bool {
-	imageExts := map[string]bool{
-		".jpg":  true,
-		".jpeg": true,
-		".png":  true,
-		".gif":  true,
-		".bmp":  true,
-		".webp": true,
-		".heic": true,
-		".heif": true,
-	}
-	return imageExts[ext]
+	return models.SupportedImageExtensions[ext]
 }
 
 // AICategorizationRequest is sent to AI service

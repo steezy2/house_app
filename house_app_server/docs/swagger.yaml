@@ -24,6 +24,8 @@ definitions:
     type: object
   models.Image:
     properties:
+      category:
+        type: string
       contentType:
         type: string
       createdAt:
@@ -34,6 +36,8 @@ definitions:
         type: string
       metadata: {}
       originalPath:
+        type: string
+      processedAt:
         type: string
       size:
         type: integer

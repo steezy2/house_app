@@ -13,15 +13,10 @@ import (
 	"house-app/models"
 )
 
-// supportedImageExts are the file extensions accepted by upload endpoints.
-var supportedImageExts = map[string]bool{
-	".jpg":  true,
-	".jpeg": true,
-	".png":  true,
-	".gif":  true,
-	".bmp":  true,
-	".webp": true,
-}
+// uploadDir is the landing zone every upload is written to. The background
+// processor (see processor/image_processor.go) later moves files out of
+// here into STORAGE_DIR.
+const uploadDir = "./uploads"
 
 // ParseTags splits a comma-separated tags string into a trimmed, non-empty
 // tag slice (e.g. "vacation, beach ,,2025" -> ["vacation", "beach", "2025"]).
@@ -75,57 +70,17 @@ func (s *Service) UploadImage(file *multipart.FileHeader, tags []string) (*model
 	// filename can't be used to escape uploadDir (e.g. "../../evil.jpg").
 	safeName := filepath.Base(file.Filename)
 
-	ext := strings.ToLower(filepath.Ext(safeName))
-	if !supportedImageExts[ext] {
-		return nil, fmt.Errorf("unsupported file type %q: allowed types are jpg, jpeg, png, gif, bmp, webp", ext)
+	if err := checkSupportedExt(safeName); err != nil {
+		return nil, err
 	}
 
-	// Create uploads directory if it doesn't exist
-	uploadDir := "./uploads"
-	if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
-		return nil, fmt.Errorf("failed to create upload directory: %w", err)
-	}
-
-	// Generate unique filename
-	filename := fmt.Sprintf("%d_%s", time.Now().Unix(), safeName)
-	storagePath := filepath.Join(uploadDir, filename)
-
-	// Open the uploaded file
 	src, err := file.Open()
 	if err != nil {
 		return nil, fmt.Errorf("failed to open uploaded file: %w", err)
 	}
 	defer src.Close()
 
-	// Create destination file
-	dst, err := os.Create(storagePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create destination file: %w", err)
-	}
-	defer dst.Close()
-
-	// Copy file contents
-	if _, err := io.Copy(dst, src); err != nil {
-		return nil, fmt.Errorf("failed to save file: %w", err)
-	}
-
-	// Create image record
-	image := models.Image{
-		Filename:     safeName,
-		OriginalPath: safeName,
-		StoragePath:  storagePath,
-		Size:         file.Size,
-		ContentType:  file.Header.Get("Content-Type"),
-		Tags:         tags,
-		CreatedAt:    time.Now(),
-	}
-
-	_, err = s.repo.CreateImage(image)
-	if err != nil {
-		return nil, fmt.Errorf("failed to save image record: %w", err)
-	}
-
-	return &image, nil
+	return s.storeImage(src, safeName, safeName, file.Header.Get("Content-Type"), file.Size, tags)
 }
 
 // BulkUploadImages handles bulk image upload from a source folder
@@ -139,12 +94,6 @@ func (s *Service) BulkUploadImages(sourceFolder string, tags []string) (*models.
 		return nil, fmt.Errorf("source folder does not exist: %s", sourceFolder)
 	}
 
-	// Create uploads directory if it doesn't exist
-	uploadDir := "./uploads"
-	if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
-		return nil, fmt.Errorf("failed to create upload directory: %w", err)
-	}
-
 	// Walk through the source folder
 	err := filepath.Walk(sourceFolder, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -152,22 +101,12 @@ func (s *Service) BulkUploadImages(sourceFolder string, tags []string) (*models.
 			return nil // Continue processing other files
 		}
 
-		// Skip directories
-		if info.IsDir() {
+		// Skip directories and anything that isn't a supported image
+		if info.IsDir() || checkSupportedExt(info.Name()) != nil {
 			return nil
 		}
 
-		// Check if file has supported extension
-		ext := strings.ToLower(filepath.Ext(info.Name()))
-		if !supportedImageExts[ext] {
-			return nil // Skip non-image files
-		}
-
 		response.TotalImages++
-
-		// Copy file to uploads directory
-		filename := fmt.Sprintf("%d_%s", time.Now().UnixNano(), info.Name())
-		storagePath := filepath.Join(uploadDir, filename)
 
 		src, err := os.Open(path)
 		if err != nil {
@@ -178,48 +117,8 @@ func (s *Service) BulkUploadImages(sourceFolder string, tags []string) (*models.
 		}
 		defer src.Close()
 
-		dst, err := os.Create(storagePath)
-		if err != nil {
-			slog.Error("Failed to create destination file", "storagePath", storagePath, "error", err)
-			response.FailedCount++
-			response.FailedFiles = append(response.FailedFiles, path)
-			return nil
-		}
-		defer dst.Close()
-
-		if _, err := io.Copy(dst, src); err != nil {
-			slog.Error("Failed to copy file", "path", path, "error", err)
-			response.FailedCount++
-			response.FailedFiles = append(response.FailedFiles, path)
-			return nil
-		}
-
-		// Determine content type
-		contentType := "image/jpeg"
-		switch ext {
-		case ".png":
-			contentType = "image/png"
-		case ".gif":
-			contentType = "image/gif"
-		case ".bmp":
-			contentType = "image/bmp"
-		case ".webp":
-			contentType = "image/webp"
-		}
-
-		// Create image record
-		image := models.Image{
-			Filename:     info.Name(),
-			OriginalPath: path,
-			StoragePath:  storagePath,
-			Size:         info.Size(),
-			ContentType:  contentType,
-			Tags:         tags,
-			CreatedAt:    time.Now(),
-		}
-
-		_, err = s.repo.CreateImage(image)
-		if err != nil {
+		contentType := contentTypeForExt(filepath.Ext(info.Name()))
+		if _, err := s.storeImage(src, info.Name(), path, contentType, info.Size(), tags); err != nil {
 			slog.Error("Failed to save image record", "path", path, "error", err)
 			response.FailedCount++
 			response.FailedFiles = append(response.FailedFiles, path)
@@ -235,4 +134,73 @@ func (s *Service) BulkUploadImages(sourceFolder string, tags []string) (*models.
 	}
 
 	return response, nil
+}
+
+// checkSupportedExt returns an error unless filename's extension is one of
+// models.SupportedImageExtensions.
+func checkSupportedExt(filename string) error {
+	ext := strings.ToLower(filepath.Ext(filename))
+	if !models.SupportedImageExtensions[ext] {
+		return fmt.Errorf("unsupported file type %q: allowed types are jpg, jpeg, png, gif, bmp, webp, heic, heif", ext)
+	}
+	return nil
+}
+
+// contentTypeForExt returns the MIME type for a supported image extension
+// (case-insensitive), falling back to a generic default for anything else.
+func contentTypeForExt(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".bmp":
+		return "image/bmp"
+	case ".webp":
+		return "image/webp"
+	case ".heic":
+		return "image/heic"
+	case ".heif":
+		return "image/heif"
+	default:
+		return "image/jpeg"
+	}
+}
+
+// storeImage copies src into uploadDir under a unique, timestamp-prefixed
+// name and saves the resulting Image record. Shared by UploadImage (a
+// single multipart file) and BulkUploadImages (files read from disk) —
+// those two only differ in where the bytes and metadata come from.
+func (s *Service) storeImage(src io.Reader, filename, originalPath, contentType string, size int64, tags []string) (*models.Image, error) {
+	if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
+		return nil, fmt.Errorf("failed to create upload directory: %w", err)
+	}
+
+	storagePath := filepath.Join(uploadDir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), filename))
+
+	dst, err := os.Create(storagePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create destination file: %w", err)
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return nil, fmt.Errorf("failed to save file: %w", err)
+	}
+
+	image := models.Image{
+		Filename:     filename,
+		OriginalPath: originalPath,
+		StoragePath:  storagePath,
+		Size:         size,
+		ContentType:  contentType,
+		Tags:         tags,
+		CreatedAt:    time.Now(),
+	}
+
+	if _, err := s.repo.CreateImage(image); err != nil {
+		return nil, fmt.Errorf("failed to save image record: %w", err)
+	}
+
+	return &image, nil
 }

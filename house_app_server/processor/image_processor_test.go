@@ -6,28 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"house-app/models"
-
-	"go.mongodb.org/mongo-driver/mongo"
+	"house-app/internal/mocks"
 )
-
-// mockRepo is a minimal models.ImageRepository for processor-level tests.
-type mockRepo struct {
-	updateFunc func(oldPath, newPath, category string) error
-}
-
-func (m *mockRepo) CreateImage(models.Image) (*mongo.InsertOneResult, error) { return nil, nil }
-func (m *mockRepo) GetImages() ([]models.Image, error)                       { return nil, nil }
-func (m *mockRepo) SearchImages(string) ([]models.Image, error)              { return nil, nil }
-func (m *mockRepo) CreateImages([]models.Image) (*mongo.InsertManyResult, error) {
-	return nil, nil
-}
-func (m *mockRepo) UpdateImagePath(oldPath, newPath, category string) error {
-	if m.updateFunc == nil {
-		return nil
-	}
-	return m.updateFunc(oldPath, newPath, category)
-}
 
 func TestIsImageFile(t *testing.T) {
 	cases := map[string]bool{
@@ -172,8 +152,8 @@ func TestMoveFile(t *testing.T) {
 
 func TestUpdateDatabaseRecord(t *testing.T) {
 	var gotOld, gotNew, gotCategory string
-	repo := &mockRepo{
-		updateFunc: func(oldPath, newPath, category string) error {
+	repo := &mocks.ImageRepository{
+		UpdateImagePathFunc: func(oldPath, newPath, category string) error {
 			gotOld, gotNew, gotCategory = oldPath, newPath, category
 			return nil
 		},
@@ -189,8 +169,8 @@ func TestUpdateDatabaseRecord(t *testing.T) {
 }
 
 func TestUpdateDatabaseRecord_PropagatesError(t *testing.T) {
-	repo := &mockRepo{
-		updateFunc: func(oldPath, newPath, category string) error {
+	repo := &mocks.ImageRepository{
+		UpdateImagePathFunc: func(oldPath, newPath, category string) error {
 			return os.ErrInvalid
 		},
 	}

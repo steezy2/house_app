@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"house-app/internal/mocks"
 	"house-app/models"
 	"house-app/service"
 
@@ -14,38 +15,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 )
-
-// MockImageRepository is a mock of ImageRepository
-type MockImageRepository struct {
-	CreateImageFunc     func(models.Image) (*mongo.InsertOneResult, error)
-	GetImagesFunc       func() ([]models.Image, error)
-	SearchImagesFunc    func(string) ([]models.Image, error)
-	CreateImagesFunc    func([]models.Image) (*mongo.InsertManyResult, error)
-	UpdateImagePathFunc func(oldStoragePath, newStoragePath, category string) error
-}
-
-func (m *MockImageRepository) CreateImage(img models.Image) (*mongo.InsertOneResult, error) {
-	return m.CreateImageFunc(img)
-}
-
-func (m *MockImageRepository) GetImages() ([]models.Image, error) {
-	return m.GetImagesFunc()
-}
-
-func (m *MockImageRepository) SearchImages(q string) ([]models.Image, error) {
-	return m.SearchImagesFunc(q)
-}
-
-func (m *MockImageRepository) CreateImages(imgs []models.Image) (*mongo.InsertManyResult, error) {
-	return m.CreateImagesFunc(imgs)
-}
-
-func (m *MockImageRepository) UpdateImagePath(oldStoragePath, newStoragePath, category string) error {
-	if m.UpdateImagePathFunc == nil {
-		return nil
-	}
-	return m.UpdateImagePathFunc(oldStoragePath, newStoragePath, category)
-}
 
 func TestAPIServer_GetImages(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -64,7 +33,7 @@ func TestAPIServer_GetImages(t *testing.T) {
 		},
 	}
 
-	mockRepo := &MockImageRepository{
+	mockRepo := &mocks.ImageRepository{
 		GetImagesFunc: func() ([]models.Image, error) {
 			return expectedImages, nil
 		},
@@ -96,7 +65,7 @@ func TestAPIServer_BulkUploadImages(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("API_KEY", "")
 
-	mockRepo := &MockImageRepository{
+	mockRepo := &mocks.ImageRepository{
 		CreateImageFunc: func(img models.Image) (*mongo.InsertOneResult, error) {
 			return &mongo.InsertOneResult{}, nil
 		},
@@ -127,7 +96,7 @@ func TestAPIServer_RejectsRequestsWithoutAPIKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("API_KEY", "secret-key")
 
-	mockService := service.NewService(&MockImageRepository{})
+	mockService := service.NewService(&mocks.ImageRepository{})
 	server := NewAPIServer(mockService)
 
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/images", nil)
@@ -143,7 +112,7 @@ func TestAPIServer_RejectsWrongAPIKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("API_KEY", "secret-key")
 
-	mockService := service.NewService(&MockImageRepository{})
+	mockService := service.NewService(&mocks.ImageRepository{})
 	server := NewAPIServer(mockService)
 
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/images", nil)
@@ -160,7 +129,7 @@ func TestAPIServer_AcceptsValidAPIKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("API_KEY", "secret-key")
 
-	mockRepo := &MockImageRepository{
+	mockRepo := &mocks.ImageRepository{
 		GetImagesFunc: func() ([]models.Image, error) {
 			return []models.Image{}, nil
 		},
@@ -182,7 +151,7 @@ func TestAPIServer_SwaggerBypassesAPIKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("API_KEY", "secret-key")
 
-	mockService := service.NewService(&MockImageRepository{})
+	mockService := service.NewService(&mocks.ImageRepository{})
 	server := NewAPIServer(mockService)
 
 	req, _ := http.NewRequest(http.MethodGet, "/swagger/index.html", nil)

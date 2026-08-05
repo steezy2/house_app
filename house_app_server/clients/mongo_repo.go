@@ -70,11 +70,18 @@ func NewMongoRepo() (*MongoRepo, error) {
 	return &MongoRepo{collection: collection}, nil
 }
 
-// CreateImage creates a new image record in the database
-func (r *MongoRepo) CreateImage(image models.Image) (*mongo.InsertOneResult, error) {
+// newImageRecord assigns a fresh ID and creation timestamp, mirroring what
+// MongoDB would otherwise leave to CreateImage/CreateImages callers to set
+// inconsistently.
+func newImageRecord(image models.Image) models.Image {
 	image.ID = primitive.NewObjectID()
 	image.CreatedAt = time.Now()
-	return r.collection.InsertOne(context.Background(), image)
+	return image
+}
+
+// CreateImage creates a new image record in the database
+func (r *MongoRepo) CreateImage(image models.Image) (*mongo.InsertOneResult, error) {
+	return r.collection.InsertOne(context.Background(), newImageRecord(image))
 }
 
 // GetImages retrieves all images from the database
@@ -134,9 +141,7 @@ func (r *MongoRepo) UpdateImagePath(oldStoragePath, newStoragePath, category str
 func (r *MongoRepo) CreateImages(images []models.Image) (*mongo.InsertManyResult, error) {
 	var docs []interface{}
 	for _, image := range images {
-		image.ID = primitive.NewObjectID()
-		image.CreatedAt = time.Now()
-		docs = append(docs, image)
+		docs = append(docs, newImageRecord(image))
 	}
 	return r.collection.InsertMany(context.Background(), docs)
 }

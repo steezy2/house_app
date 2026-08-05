@@ -6,6 +6,21 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+// SupportedImageExtensions are the file extensions accepted for upload and
+// eligible for background processing — the single source of truth shared
+// by service.UploadImage/BulkUploadImages (which reject anything else) and
+// processor.isImageFile (which skips anything else).
+var SupportedImageExtensions = map[string]bool{
+	".jpg":  true,
+	".jpeg": true,
+	".png":  true,
+	".gif":  true,
+	".bmp":  true,
+	".webp": true,
+	".heic": true,
+	".heif": true,
+}
+
 // Image represents an image entry in the database
 type Image struct {
 	ID           primitive.ObjectID `bson:"_id,omitempty" json:"id,omitempty"`

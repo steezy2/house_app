@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../api/api.dart';
-import '../../api/api_client.dart';
 import '../../state/settings_state.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/error_message.dart';
 
 /// Where the server address and API key (see house_app_server's `API_KEY`
 /// env var / `X-API-Key` header) are entered once, then reused by every
@@ -67,25 +67,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _testSucceeded = true;
         _testMessage = 'Connected successfully.';
       });
-    } on ApiConfigException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _testSucceeded = false;
-        _testMessage = e.message;
-      });
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _testSucceeded = false;
-        _testMessage = e.statusCode == 401
-            ? 'Connected, but the server rejected the API key.'
-            : 'Server responded with an error: ${e.message}';
-      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _testSucceeded = false;
-        _testMessage = 'Could not reach the server: $e';
+        _testMessage = describeApiError(
+          e,
+          unauthorizedMessage: 'Connected, but the server rejected the API key.',
+        );
       });
     } finally {
       if (mounted) setState(() => _testing = false);

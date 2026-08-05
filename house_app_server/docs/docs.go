@@ -217,6 +217,9 @@ const docTemplate = `{
         "models.Image": {
             "type": "object",
             "properties": {
+                "category": {
+                    "type": "string"
+                },
                 "contentType": {
                     "type": "string"
                 },
@@ -231,6 +234,9 @@ const docTemplate = `{
                 },
                 "metadata": {},
                 "originalPath": {
+                    "type": "string"
+                },
+                "processedAt": {
                     "type": "string"
                 },
                 "size": {

@@ -5,10 +5,10 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../api/api.dart';
-import '../../api/api_client.dart';
 import '../../models/bulk_upload_result.dart';
 import '../../state/settings_state.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/error_message.dart';
 import '../../widgets/not_configured_banner.dart';
 
 /// The primary screen: pick photos from the gallery, optionally tag them,
@@ -78,19 +78,15 @@ class _UploadScreenState extends State<UploadScreen> {
         _selected = [];
         _tagsController.clear();
       });
-    } on ApiConfigException catch (e) {
-      if (!mounted) return;
-      setState(() => _error = e.message);
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(
-        () => _error = e.statusCode == 401
-            ? 'The server rejected the API key. Check it in Settings.'
-            : e.message,
-      );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Could not reach the server: $e');
+      setState(
+        () => _error = describeApiError(
+          e,
+          unauthorizedMessage:
+              'The server rejected the API key. Check it in Settings.',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _uploading = false);
     }

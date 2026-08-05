@@ -23,6 +23,12 @@ type APIServer struct {
 	router  *gin.Engine
 }
 
+// respondError writes the {"error": message} shape every handler below
+// uses for a non-2xx response.
+func respondError(c *gin.Context, status int, message string) {
+	c.JSON(status, gin.H{"error": message})
+}
+
 // CORSMiddleware handles CORS headers
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -114,7 +120,7 @@ func (s *APIServer) UploadImage(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
 		slog.Error("Failed to get file from form", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No file provided"})
+		respondError(c, http.StatusBadRequest, "No file provided")
 		return
 	}
 
@@ -123,7 +129,7 @@ func (s *APIServer) UploadImage(c *gin.Context) {
 	image, err := s.service.UploadImage(file, tags)
 	if err != nil {
 		slog.Error("Failed to upload image", "filename", file.Filename, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -148,14 +154,14 @@ func (s *APIServer) UploadMultipleImages(c *gin.Context) {
 	form, err := c.MultipartForm()
 	if err != nil {
 		slog.Error("Failed to get multipart form", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid multipart form"})
+		respondError(c, http.StatusBadRequest, "Invalid multipart form")
 		return
 	}
 
 	files := form.File["files"]
 	if len(files) == 0 {
 		slog.Error("No files provided in upload")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No files provided"})
+		respondError(c, http.StatusBadRequest, "No files provided")
 		return
 	}
 
@@ -198,7 +204,7 @@ func (s *APIServer) GetImages(c *gin.Context) {
 	images, err := s.service.GetImages()
 	if err != nil {
 		slog.Error("Failed to fetch images", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching images"})
+		respondError(c, http.StatusInternalServerError, "Error fetching images")
 		return
 	}
 	c.JSON(http.StatusOK, images)
@@ -215,14 +221,14 @@ func (s *APIServer) GetImages(c *gin.Context) {
 func (s *APIServer) SearchImages(c *gin.Context) {
 	query := c.Query("q")
 	if query == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Query parameter 'q' is required"})
+		respondError(c, http.StatusBadRequest, "Query parameter 'q' is required")
 		return
 	}
 
 	images, err := s.service.SearchImages(query)
 	if err != nil {
 		slog.Error("Failed to search images", "query", query, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error searching images"})
+		respondError(c, http.StatusInternalServerError, "Error searching images")
 		return
 	}
 
@@ -242,12 +248,12 @@ func (s *APIServer) BulkUploadImages(c *gin.Context) {
 	var req models.BulkUploadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		slog.Error("Failed to parse bulk upload request", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if req.SourceFolder == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sourceFolder is required"})
+		respondError(c, http.StatusBadRequest, "sourceFolder is required")
 		return
 	}
 
@@ -255,7 +261,7 @@ func (s *APIServer) BulkUploadImages(c *gin.Context) {
 	result, err := s.service.BulkUploadImages(req.SourceFolder, req.Tags)
 	if err != nil {
 		slog.Error("Bulk upload failed", "sourceFolder", req.SourceFolder, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
