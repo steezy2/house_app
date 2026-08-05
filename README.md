@@ -2,6 +2,12 @@
 
 A comprehensive house management API built with Go, providing services for image and file storage, and more. This application serves as a centralized hub for managing various household digital assets.
 
+Two clients live in this repo:
+- [house_app_server](house_app_server): the Go API described below.
+- [house_app_mobile](house_app_mobile): a Flutter phone app — select photos
+  and upload them to the server in a tap. See its own
+  [README](house_app_mobile/README.md) for setup.
+
 ## Features
 
 - **Image Storage**: Upload, store, and manage images with metadata

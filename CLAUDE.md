@@ -2,28 +2,31 @@
 
 Project navigation notes for Claude Code. Human-facing docs live in
 [README.md](README.md), [house_app_server/README.md](house_app_server/README.md),
-[house_app_server/API_EXAMPLES.md](house_app_server/API_EXAMPLES.md), and
+[house_app_server/API_EXAMPLES.md](house_app_server/API_EXAMPLES.md),
+[house_app_mobile/README.md](house_app_mobile/README.md), and
 [IMAGE_PROCESSING.md](IMAGE_PROCESSING.md) — this file is a faster map for
 finding things and a list of non-obvious traps, not a replacement for them.
 
 ## What this is
 
-A personal/home photo-library backend: a single Go API (no web or mobile
-frontend lives in this repo — interact via curl or the generated Swagger
-UI). The primary intended client is a phone on the home network — e.g. a
-"select photos, tap upload" flow hitting `POST /images/multiple` — not a
-browser or desktop app. Clients upload images; a background worker
-separately reorganizes `./uploads` into a dated, categorized folder tree.
-It started life as a bookmark-manager server (`bookmark_server`) — see
-[MIGRATION_SUMMARY.md](MIGRATION_SUMMARY.md) for that rewrite's history if
-you find a stray reference to bookmarks/scraping anywhere.
+A personal/home photo-library system: a Go API
+([house_app_server](house_app_server)) plus a Flutter phone client
+([house_app_mobile](house_app_mobile)) that's the primary intended way to
+use it — pick photos on your phone and upload them in a tap while on the
+home network. There's no web frontend; anything not from the phone app
+goes through curl or the generated Swagger UI. The server separately runs
+a background worker that reorganizes `./uploads` into a dated, categorized
+folder tree. The server started life as a bookmark-manager
+(`bookmark_server`) — see [MIGRATION_SUMMARY.md](MIGRATION_SUMMARY.md) for
+that rewrite's history if you find a stray reference to bookmarks/scraping
+anywhere.
 
 ## Where things live
 
-- `house_app_server/`: the entire application (single Go module,
-  `house-app`). Layered `clients` (Mongo) -> `models` (domain types + repo
-  interface) -> `service` (upload/business logic) -> `controller` (HTTP
-  routes + swag annotations). Composition root: `main.go`.
+- `house_app_server/`: the Go API (single module, `house-app`). Layered
+  `clients` (Mongo) -> `models` (domain types + repo interface) ->
+  `service` (upload/business logic) -> `controller` (HTTP routes + swag
+  annotations). Composition root: `main.go`.
   - `processor/image_processor.go`: independent background loop, started
     from `main.go` alongside (not through) the HTTP server. Polls
     `UPLOAD_DIR`, extracts EXIF, categorizes, renames, and moves files into
@@ -31,11 +34,16 @@ you find a stray reference to bookmarks/scraping anywhere.
   - `docs/`: generated Swagger/OpenAPI output (`docs.go`, `swagger.json`,
     `swagger.yaml`). Regenerate with `make docs` after touching swag
     annotations in `controller/api.go` or `main.go` — don't hand-edit.
+- `house_app_mobile/`: the Flutter client (package `house_app_mobile`).
+  Layout mirrors `InsuranceMarketplace/apps/mobile` (`api/`, `models/`,
+  `screens/`, `state/`, `theme/`, `widgets/`), deliberately without that
+  app's `go_router` or login flow — see its own CLAUDE-equivalent notes
+  below and [house_app_mobile/README.md](house_app_mobile/README.md).
 - Root-level `*.md` files are the human docs; `MIGRATION_SUMMARY.md` is a
   point-in-time record of the bookmark→house-app rewrite, not living
   documentation — don't "fix" it to match current behavior.
 
-## Key conventions and known traps worth knowing before touching this code
+## Server: key conventions and known traps
 
 - **Auth is a single shared secret, not per-user.** If `API_KEY` is set,
   `controller.APIKeyMiddleware` requires a matching `X-API-Key` header on
@@ -81,6 +89,43 @@ you find a stray reference to bookmarks/scraping anywhere.
 - Tests in `service/` that call `UploadImage` write to `./uploads` — they
   clean up with `t.Cleanup(func() { os.RemoveAll("./uploads") })`. Keep
   that pattern for any new test that exercises upload.
+
+## Mobile: key conventions and known traps
+
+- **`ApiClient` reads `SettingsStorage` fresh on every request**, not a
+  cached value — same pattern as the sibling Insurance Marketplace app's
+  `ApiClient` reading `TokenStorage` independently of `AuthState`. If you
+  add a new API-backed screen, don't thread `baseUrl`/`apiKey` through as
+  parameters; let `ApiClient` resolve them itself.
+- **No thumbnails in the Library tab, on purpose.** `house_app_server` has
+  no endpoint to fetch raw image bytes, so `ImageAsset` only carries
+  metadata. Don't add an `Image.network(...)` call against `storagePath`
+  — that's a server filesystem path, not a URL, and won't resolve.
+- **Plain HTTP to a LAN address requires platform config** — see
+  `house_app_mobile/README.md`'s "Plain HTTP to a LAN address" section.
+  If a fresh device/emulator can't reach the server despite correct
+  Settings, check that `usesCleartextTraffic`
+  (`android/app/src/main/AndroidManifest.xml`) and
+  `NSAllowsLocalNetworking` (`ios/Runner/Info.plist`) weren't reverted by
+  a `flutter create`/upgrade regenerating those files.
+- **`SettingsState.normalizeBaseUrl`** is the only place that should touch
+  user-typed server addresses — it defaults a bare `192.168.1.23:8080` to
+  `http://`, and strips trailing slashes so `'$baseUrl$path'`
+  concatenation in `ApiClient._uri` doesn't produce `//api`. Route new
+  settings-editing UI through `SettingsState.save`, not `SettingsStorage`
+  directly, or you'll bypass this.
+- **No `go_router`, unlike the Insurance Marketplace app** — there's no
+  auth-gated routing here (a single shared `API_KEY`, no per-user
+  sessions), so `widgets/bottom_nav_shell.dart` is a plain `IndexedStack`.
+  Don't add `go_router` back in without an actual reason (deep links,
+  route guards) to justify it.
+- Tests avoid real `flutter_secure_storage` (its platform channels aren't
+  available under plain `flutter test`) via `test/fakes/fake_settings_storage.dart`,
+  and avoid real network calls via `package:http/testing.dart`'s
+  `MockClient`/`MockClient.streaming` — the latter is required (not the
+  plain `MockClient`) for asserting on multipart upload fields/files,
+  since only the streaming handler receives the original
+  `MultipartRequest` instance rather than a reconstructed plain `Request`.
 
 ## Keeping this file current
 
