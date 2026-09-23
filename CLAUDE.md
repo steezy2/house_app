@@ -6,6 +6,9 @@ Project navigation notes for Claude Code. Human-facing docs live in
 [house_app_mobile/README.md](house_app_mobile/README.md), and
 [IMAGE_PROCESSING.md](IMAGE_PROCESSING.md) — this file is a faster map for
 finding things and a list of non-obvious traps, not a replacement for them.
+[CHANGELOG.md](CHANGELOG.md) is the chronological log of notable changes —
+check its most recent entries before assuming current behavior; this file
+isn't versioned per-change, so it can lag behind the changelog.
 
 ## What this is
 
@@ -23,14 +26,25 @@ anywhere.
 
 ## Where things live
 
-- `house_app_server/`: the Go API (single module, `house-app`). Layered
-  `clients` (Mongo) -> `models` (domain types + repo interface) ->
-  `service` (upload/business logic) -> `controller` (HTTP routes + swag
-  annotations). Composition root: `main.go`.
+- `house_app_server/`: the Go API (single module, `house-app`, requiring
+  Go 1.24+ since the `backup/` package's AWS SDK dependency bumped it from
+  1.21). Layered `clients` (Mongo) -> `models` (domain types + repo
+  interface) -> `service` (upload/business logic) -> `controller` (HTTP
+  routes + swag annotations). Composition root: `main.go`.
   - `processor/image_processor.go`: independent background loop, started
     from `main.go` alongside (not through) the HTTP server. Polls
-    `UPLOAD_DIR`, extracts EXIF, categorizes, renames, and moves files into
-    `STORAGE_DIR/YYYY/MM/category/`.
+    `UPLOAD_DIR`, extracts EXIF, categorizes, renames, moves files into
+    `STORAGE_DIR/YYYY/MM/category/`, then mirrors each to every configured
+    `backup.Destination`.
+  - `backup/`: `Destination` interface (`Name()` + `Copy(ctx,
+    relativePath, localPath)`) with `LocalDestination` (another
+    drive/NAS path) and `S3Destination` (any S3-compatible bucket)
+    implementations. `main.go`'s `buildBackupDestinations` assembles the
+    configured list from `BACKUP_LOCAL_DIRS`/`BACKUP_S3_*` env vars.
+  - `internal/mocks/`: shared `models.ImageRepository` test double used by
+    `controller`, `service`, and `processor` tests — don't hand-roll
+    another copy; add fields there if a test needs a new repo method
+    mocked.
   - `docs/`: generated Swagger/OpenAPI output (`docs.go`, `swagger.json`,
     `swagger.yaml`). Regenerate with `make docs` after touching swag
     annotations in `controller/api.go` or `main.go` — don't hand-edit.
@@ -71,11 +85,26 @@ anywhere.
   both `POST /images` and `POST /images/multiple`.
   `POST /images/bulk-upload` takes `tags` as a JSON array directly and
   doesn't go through `ParseTags`.
-- **Upload validation lives in `service.supportedImageExts`** (a
-  package-level map), shared by `UploadImage` and `BulkUploadImages` — add
-  a new format there, not in two separate places. `UploadImage` also runs
+- **Upload validation lives in `models.SupportedImageExtensions` /
+  `SupportedVideoExtensions`** (package-level maps in `models`, not
+  `service`, so `processor.isMediaFile` can share them too) — add a new
+  format there, not in per-package copies; that's exactly the drift that
+  used to exist between upload validation and the processor's file-type
+  check before they were unified. `service.checkSupportedExt` and
+  `contentTypeForExt` both consult these sets. `UploadImage` also runs
   `filepath.Base` on the client-supplied filename before using it in any
   path — don't remove that when touching upload code.
+- **Backup is additive and best-effort, never blocking.** A
+  `backup.Destination` failing (drive unplugged, bucket unreachable) is
+  logged as a warning in `processor.backupFile` and does not fail
+  processing or affect other destinations — the primary copy in
+  `STORAGE_DIR` already succeeded by the time backup runs.
+  `models.Image.BackedUpTo` only lists destinations that actually
+  confirmed a copy, matched by the *current* `storagePath` (same
+  match-by-storagePath pattern as `UpdateImagePath`). A delete-from-phone
+  feature is explicitly planned to depend on `BackedUpTo` covering every
+  configured destination before treating a file as safe to remove from
+  the source device — don't build that without checking this field.
 - **Makefile targets are prefixed**: `go-run`, `go-test`, `go-test-html`,
   `docs`, `init`, `go-clean`, `build` (in
   [house_app_server/Makefile](house_app_server/Makefile)) — not the bare
@@ -126,6 +155,34 @@ anywhere.
   plain `MockClient`) for asserting on multipart upload fields/files,
   since only the streaming handler receives the original
   `MultipartRequest` instance rather than a reconstructed plain `Request`.
+- **`lib/services/media_library.dart` wraps `photo_manager`** for the
+  Upload tab's "Upload All" full-camera-roll flow — a materially different
+  permission model than `image_picker`'s picker (which needs no OS
+  permission at all): full library access on Android needs
+  `READ_MEDIA_IMAGES`/`READ_MEDIA_VIDEO` (declared explicitly in
+  `AndroidManifest.xml`; `photo_manager`'s own manifest only covers legacy
+  `READ_EXTERNAL_STORAGE` up to API 32), and on iOS can come back as
+  `MediaAccessResult.limited` (the user granted only some photos) rather
+  than `.full` — don't collapse that distinction, the UI is supposed to
+  say so rather than silently uploading a partial library.
+  `UploadScreen(mediaLibrary: ...)` is constructor-injectable specifically
+  so tests can supply a `FakeMediaLibrary` instead of hitting real
+  platform channels.
+- **`lib/utils/batching.dart`'s `batchIndicesBySize`** caps each upload
+  batch at ≤20 files or ≤150MB combined (whichever comes first) — it's a
+  pure function operating on a list of byte sizes and returning index
+  groups, deliberately decoupled from `photo_manager`/`image_picker`
+  types, so don't thread those into it.
+- **Known test-environment trap**: awaiting `http.MultipartFile.fromPath`
+  (real file I/O) directly inside a `testWidgets` body hangs indefinitely
+  in this environment — reproduced and confirmed with a minimal repro; the
+  identical call in a plain `test()` resolves instantly. This is why
+  `test/screens/upload_screen_test.dart` never lets a real file reach
+  `postMultipart`, and why actual multipart-upload mechanics are tested at
+  the `test()` level in `test/api/images_api_test.dart` instead. If a
+  widget test involving file upload seems to hang with no error, this is
+  almost certainly why — don't spend time re-debugging it, restructure the
+  test to avoid real file I/O inside `testWidgets` instead.
 
 ## Keeping this file current
 

@@ -217,6 +217,13 @@ const docTemplate = `{
         "models.Image": {
             "type": "object",
             "properties": {
+                "backedUpTo": {
+                    "description": "BackedUpTo lists the names of configured backup.Destinations that\nhave confirmed a copy of this file (see processor.processImage).\nPartial credit is expected: if 2 of 3 configured destinations\nsucceeded, this has 2 entries. A future delete-from-phone feature\nshould check this covers every configured destination before\ntreating a file as safe to remove from the source device.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "category": {
                     "type": "string"
                 },

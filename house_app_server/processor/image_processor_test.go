@@ -1,15 +1,41 @@
 package processor
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
+	"house-app/backup"
 	"house-app/internal/mocks"
 )
 
-func TestIsImageFile(t *testing.T) {
+// fakeDestination is a minimal backup.Destination test double that records
+// every Copy call it receives and can be made to fail.
+type fakeDestination struct {
+	name    string
+	failErr error
+	calls   []fakeDestinationCall
+}
+
+type fakeDestinationCall struct {
+	relativePath string
+	localPath    string
+}
+
+func (d *fakeDestination) Name() string { return d.name }
+
+func (d *fakeDestination) Copy(ctx context.Context, relativePath, localPath string) error {
+	d.calls = append(d.calls, fakeDestinationCall{relativePath: relativePath, localPath: localPath})
+	return d.failErr
+}
+
+var _ backup.Destination = (*fakeDestination)(nil)
+
+func TestIsMediaFile(t *testing.T) {
 	cases := map[string]bool{
 		".jpg":  true,
 		".jpeg": true,
@@ -19,14 +45,66 @@ func TestIsImageFile(t *testing.T) {
 		".webp": true,
 		".heic": true,
 		".heif": true,
+		".mp4":  true,
+		".mov":  true,
+		".m4v":  true,
+		".3gp":  true,
+		".webm": true,
+		".avi":  true,
 		".txt":  false,
 		".JPG":  false, // callers are expected to lowercase before calling
 		"":      false,
 	}
 	for ext, want := range cases {
-		if got := isImageFile(ext); got != want {
-			t.Errorf("isImageFile(%q) = %v, want %v", ext, got, want)
+		if got := isMediaFile(ext); got != want {
+			t.Errorf("isMediaFile(%q) = %v, want %v", ext, got, want)
 		}
+	}
+}
+
+func TestIsVideoFile(t *testing.T) {
+	cases := map[string]bool{
+		".mp4":  true,
+		".mov":  true,
+		".jpg":  false,
+		".heic": false,
+		"":      false,
+	}
+	for ext, want := range cases {
+		if got := isVideoFile(ext); got != want {
+			t.Errorf("isVideoFile(%q) = %v, want %v", ext, got, want)
+		}
+	}
+}
+
+func TestProcessImage_VideoDefaultsToVideoCategory(t *testing.T) {
+	tmp := t.TempDir()
+	uploadDir := filepath.Join(tmp, "uploads")
+	storageDir := filepath.Join(tmp, "storage")
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("failed to create upload dir: %v", err)
+	}
+
+	src := filepath.Join(uploadDir, "1700000000_clip.mp4")
+	if err := os.WriteFile(src, []byte("not a real video, just bytes"), 0o644); err != nil {
+		t.Fatalf("failed to write source file: %v", err)
+	}
+
+	p := &ImageProcessor{
+		uploadDir:      uploadDir,
+		storageBaseDir: storageDir,
+		repo:           &mocks.ImageRepository{},
+	}
+
+	result := p.processImage(src)
+	if result.Error != nil {
+		t.Fatalf("processImage returned error: %v", result.Error)
+	}
+	if result.Category != "video" {
+		t.Errorf("Category = %q, want %q", result.Category, "video")
+	}
+	if _, err := os.Stat(result.NewPath); err != nil {
+		t.Errorf("expected file at %q, stat err = %v", result.NewPath, err)
 	}
 }
 
@@ -178,5 +256,70 @@ func TestUpdateDatabaseRecord_PropagatesError(t *testing.T) {
 
 	if err := p.updateDatabaseRecord("old", "new", "cat"); err == nil {
 		t.Error("expected error to propagate from repo.UpdateImagePath, got nil")
+	}
+}
+
+func TestBackupFile_RecordsOnlySucceededDestinations(t *testing.T) {
+	storageDir := t.TempDir()
+	fileDir := filepath.Join(storageDir, "2026", "08", "travel")
+	if err := os.MkdirAll(fileDir, 0o755); err != nil {
+		t.Fatalf("failed to create storage subdirectory: %v", err)
+	}
+	filePath := filepath.Join(fileDir, "photo.jpg")
+	if err := os.WriteFile(filePath, []byte("bytes"), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	okDest := &fakeDestination{name: "D:/backup1"}
+	failDest := &fakeDestination{name: "s3:bucket", failErr: errors.New("network error")}
+
+	var gotPath string
+	var gotBackedUpTo []string
+	repo := &mocks.ImageRepository{
+		UpdateBackupStatusFunc: func(storagePath string, backedUpTo []string) error {
+			gotPath = storagePath
+			gotBackedUpTo = backedUpTo
+			return nil
+		},
+	}
+
+	p := &ImageProcessor{
+		storageBaseDir: storageDir,
+		repo:           repo,
+		destinations:   []backup.Destination{okDest, failDest},
+	}
+
+	p.backupFile(filePath)
+
+	if gotPath != filePath {
+		t.Errorf("UpdateBackupStatus storagePath = %q, want %q", gotPath, filePath)
+	}
+	if !reflect.DeepEqual(gotBackedUpTo, []string{"D:/backup1"}) {
+		t.Errorf("backedUpTo = %v, want [D:/backup1]", gotBackedUpTo)
+	}
+
+	wantRelative := filepath.Join("2026", "08", "travel", "photo.jpg")
+	if len(okDest.calls) != 1 || okDest.calls[0].relativePath != wantRelative {
+		t.Errorf("okDest.calls = %+v, want one call with relativePath %q", okDest.calls, wantRelative)
+	}
+	if len(failDest.calls) != 1 {
+		t.Errorf("failDest.calls = %+v, want exactly one call despite failing", failDest.calls)
+	}
+}
+
+func TestBackupFile_NoDestinationsConfiguredSkipsUpdate(t *testing.T) {
+	called := false
+	repo := &mocks.ImageRepository{
+		UpdateBackupStatusFunc: func(storagePath string, backedUpTo []string) error {
+			called = true
+			return nil
+		},
+	}
+	p := &ImageProcessor{repo: repo}
+
+	p.backupFile("some/path.jpg")
+
+	if called {
+		t.Error("expected UpdateBackupStatus not to be called when no destinations are configured")
 	}
 }

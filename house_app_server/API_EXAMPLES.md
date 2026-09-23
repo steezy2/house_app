@@ -150,14 +150,13 @@ Response:
 }
 ```
 
-### Supported Image Formats
+### Supported Formats
 
-The bulk upload endpoint supports the following image formats:
-- JPEG (.jpg, .jpeg)
-- PNG (.png)
-- GIF (.gif)
-- BMP (.bmp)
-- WebP (.webp)
+Every upload endpoint (single, multiple, and bulk) supports:
+- Images: JPEG (.jpg, .jpeg), PNG (.png), GIF (.gif), BMP (.bmp), WebP
+  (.webp), HEIC/HEIF (.heic, .heif)
+- Video: MP4 (.mp4), QuickTime (.mov), M4V (.m4v), 3GP (.3gp), WebM
+  (.webm), AVI (.avi)
 
 ## Notes
 

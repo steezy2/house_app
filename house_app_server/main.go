@@ -5,9 +5,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"house-app/backup"
 	"house-app/clients"
 	"house-app/controller"
 	"house-app/docs"
@@ -56,7 +58,8 @@ func main() {
 	storageDir := getEnv("STORAGE_DIR", "E:/house_app_storage")
 	processingInterval := getEnvDuration("PROCESSING_INTERVAL", 5*time.Minute)
 
-	imageProcessor := processor.NewImageProcessor(uploadDir, storageDir, repo)
+	backupDestinations := buildBackupDestinations()
+	imageProcessor := processor.NewImageProcessor(uploadDir, storageDir, repo, backupDestinations)
 
 	// Start image processor in background
 	ctx, cancel := context.WithCancel(context.Background())
@@ -98,4 +101,54 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 		}
 	}
 	return defaultValue
+}
+
+// buildBackupDestinations assembles the configured backup.Destinations
+// from BACKUP_LOCAL_DIRS (a comma-separated list of local/network paths —
+// 0, 1, 2, 3, or more) and the optional BACKUP_S3_* cloud settings. Either,
+// both, or neither can be configured; see README.md's Environment
+// Variables table.
+func buildBackupDestinations() []backup.Destination {
+	var destinations []backup.Destination
+
+	if localDirs := os.Getenv("BACKUP_LOCAL_DIRS"); localDirs != "" {
+		for _, dir := range strings.Split(localDirs, ",") {
+			dir = strings.TrimSpace(dir)
+			if dir == "" {
+				continue
+			}
+			destinations = append(destinations, backup.NewLocalDestination(dir))
+		}
+	}
+
+	s3Bucket := os.Getenv("BACKUP_S3_BUCKET")
+	s3AccessKey := os.Getenv("BACKUP_S3_ACCESS_KEY")
+	s3SecretKey := os.Getenv("BACKUP_S3_SECRET_KEY")
+	if s3Bucket != "" && s3AccessKey != "" && s3SecretKey != "" {
+		s3Dest, err := backup.NewS3Destination(context.Background(), backup.S3Config{
+			Endpoint:  os.Getenv("BACKUP_S3_ENDPOINT"),
+			Bucket:    s3Bucket,
+			AccessKey: s3AccessKey,
+			SecretKey: s3SecretKey,
+			Region:    getEnv("BACKUP_S3_REGION", "us-east-1"),
+		})
+		if err != nil {
+			slog.Error("Failed to configure S3 backup destination, skipping it", "error", err)
+		} else {
+			destinations = append(destinations, s3Dest)
+		}
+	}
+
+	if len(destinations) == 0 {
+		slog.Warn("No backup destinations configured (BACKUP_LOCAL_DIRS/BACKUP_S3_*) — uploaded files exist only in STORAGE_DIR, with no redundancy")
+		return destinations
+	}
+
+	names := make([]string, len(destinations))
+	for i, d := range destinations {
+		names[i] = d.Name()
+	}
+	slog.Info("Backup destinations configured", "destinations", names)
+
+	return destinations
 }

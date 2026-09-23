@@ -52,8 +52,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<!-- Required by image_picker for gallery access. -->
+	<!-- Required by image_picker (picker-scoped access) and photo_manager
+	     (full-library access for the "Upload All" flow, see
+	     lib/services/media_library.dart). -->
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>House App needs access to your photos so you can select which ones to upload.</string>
+	<string>House App needs access to your photos and videos so you can select which ones to upload, or upload everything at once.</string>
 </dict>
 </plist>

@@ -8,9 +8,21 @@ the equivalent curl calls.
 
 ## What it does
 
-- **Upload tab**: select any number of photos from your gallery, optionally
-  tag them, and upload them all in a single request to
-  `POST /api/v1/images/multiple`.
+- **Upload tab**:
+  - **Select Photos**: pick any number of photos from your gallery
+    (`image_picker`'s picker UI, no special permission needed) and upload
+    them in one request to `POST /api/v1/images/multiple`.
+  - **Upload All Photos & Videos**: enumerates *every* photo and video
+    already on the device (via `photo_manager`'s full-library access —
+    a broader, more visible OS permission than the picker above needs)
+    and uploads them all, split into batches of ≤20 files or ≤150MB
+    (whichever comes first) so a single request doesn't try to send an
+    unbounded amount of data. Shows a confirmation dialog with the asset
+    count before starting, and a progress bar during upload. See
+    `lib/services/media_library.dart` and `lib/utils/batching.dart`.
+    **This does not delete anything from the device** — see
+    [Future Enhancements](../README.md#future-enhancements) for the
+    planned (not yet built) delete-after-verified-backup step.
 - **Library tab**: lists everything uploaded so far (filename, tags,
   category, upload time), pull-to-refresh via `GET /api/v1/images`. This is
   metadata only — the server has no endpoint to serve image bytes back, so
@@ -48,6 +60,18 @@ default:
 If you ever put the server behind real TLS, these become unnecessary but
 harmless.
 
+### Full photo library access
+
+"Upload All" needs a broader permission than picking individual photos —
+Android's `READ_MEDIA_IMAGES`/`READ_MEDIA_VIDEO` (declared explicitly in
+`AndroidManifest.xml`; `photo_manager`'s own manifest only covers the
+legacy `READ_EXTERNAL_STORAGE` up to API 32) and iOS's full Photos access
+via the existing `NSPhotoLibraryUsageDescription`. On iOS, a user can grant
+**Limited Photos** access instead of full access — the app detects this
+(`MediaAccessResult.limited`) and says so in the confirmation dialog,
+rather than silently uploading a partial library while claiming
+"everything."
+
 ## Testing
 
 ```bash
@@ -58,6 +82,15 @@ Tests use `package:http/testing.dart`'s `MockClient` and an in-memory
 `FakeSettingsStorage` (see `test/fakes/`) — no real network calls or
 platform-channel-backed secure storage, so they run under plain
 `flutter test`.
+
+> **Known test-environment gotcha**: awaiting `http.MultipartFile.fromPath`
+> (real file I/O) directly inside a `testWidgets` body hangs indefinitely
+> in this environment, even though the identical call in a plain `test()`
+> resolves instantly (reproduced and confirmed — see
+> `test/screens/upload_screen_test.dart`'s file comment). Multipart upload
+> mechanics are tested at the `test()` level in
+> `test/api/images_api_test.dart`; widget tests that touch the upload flow
+> avoid ever letting a real file reach `postMultipart`.
 
 ## Structure
 

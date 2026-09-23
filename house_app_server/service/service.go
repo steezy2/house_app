@@ -80,7 +80,16 @@ func (s *Service) UploadImage(file *multipart.FileHeader, tags []string) (*model
 	}
 	defer src.Close()
 
-	return s.storeImage(src, safeName, safeName, file.Header.Get("Content-Type"), file.Size, tags)
+	// Trust the client's declared Content-Type unless it's missing or the
+	// generic fallback many upload libraries send for a type they don't
+	// recognize — in that case, derive it from the extension the same way
+	// BulkUploadImages already does, rather than storing a useless value.
+	contentType := file.Header.Get("Content-Type")
+	if contentType == "" || contentType == "application/octet-stream" {
+		contentType = contentTypeForExt(filepath.Ext(safeName))
+	}
+
+	return s.storeImage(src, safeName, safeName, contentType, file.Size, tags)
 }
 
 // BulkUploadImages handles bulk image upload from a source folder
@@ -137,17 +146,19 @@ func (s *Service) BulkUploadImages(sourceFolder string, tags []string) (*models.
 }
 
 // checkSupportedExt returns an error unless filename's extension is one of
-// models.SupportedImageExtensions.
+// models.SupportedImageExtensions or models.SupportedVideoExtensions.
 func checkSupportedExt(filename string) error {
 	ext := strings.ToLower(filepath.Ext(filename))
-	if !models.SupportedImageExtensions[ext] {
-		return fmt.Errorf("unsupported file type %q: allowed types are jpg, jpeg, png, gif, bmp, webp, heic, heif", ext)
+	if !models.SupportedImageExtensions[ext] && !models.SupportedVideoExtensions[ext] {
+		return fmt.Errorf("unsupported file type %q: allowed types are jpg, jpeg, png, gif, bmp, webp, heic, heif, mp4, mov, m4v, 3gp, webm, avi", ext)
 	}
 	return nil
 }
 
-// contentTypeForExt returns the MIME type for a supported image extension
-// (case-insensitive), falling back to a generic default for anything else.
+// contentTypeForExt returns the MIME type for a supported image or video
+// extension (case-insensitive), falling back to a generic image default
+// for anything else (checkSupportedExt is expected to have already
+// rejected truly unsupported extensions before this is called).
 func contentTypeForExt(ext string) string {
 	switch strings.ToLower(ext) {
 	case ".png":
@@ -162,6 +173,18 @@ func contentTypeForExt(ext string) string {
 		return "image/heic"
 	case ".heif":
 		return "image/heif"
+	case ".mov":
+		return "video/quicktime"
+	case ".m4v":
+		return "video/x-m4v"
+	case ".3gp":
+		return "video/3gpp"
+	case ".webm":
+		return "video/webm"
+	case ".avi":
+		return "video/x-msvideo"
+	case ".mp4":
+		return "video/mp4"
 	default:
 		return "image/jpeg"
 	}

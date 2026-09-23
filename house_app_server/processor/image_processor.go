@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"house-app/backup"
 	"house-app/models"
 
 	"github.com/rwcarlsen/goexif/exif"
@@ -21,15 +22,19 @@ type ImageProcessor struct {
 	storageBaseDir string
 	repo           models.ImageRepository
 	aiEnabled      bool
+	destinations   []backup.Destination
 }
 
-// NewImageProcessor creates a new image processor
-func NewImageProcessor(uploadDir, storageBaseDir string, repo models.ImageRepository) *ImageProcessor {
+// NewImageProcessor creates a new image processor. destinations may be
+// empty (no backup configured) — see main.go for how it's built from
+// BACKUP_LOCAL_DIRS/BACKUP_S3_* env vars.
+func NewImageProcessor(uploadDir, storageBaseDir string, repo models.ImageRepository, destinations []backup.Destination) *ImageProcessor {
 	return &ImageProcessor{
 		uploadDir:      uploadDir,
 		storageBaseDir: storageBaseDir,
 		repo:           repo,
 		aiEnabled:      os.Getenv("ENABLE_AI_CATEGORIZATION") == "true",
+		destinations:   destinations,
 	}
 }
 
@@ -81,9 +86,9 @@ func (p *ImageProcessor) ProcessAllImages() {
 			continue
 		}
 
-		// Check if it's an image file
+		// Check if it's a supported image or video file
 		ext := strings.ToLower(filepath.Ext(file.Name()))
-		if !isImageFile(ext) {
+		if !isMediaFile(ext) {
 			continue
 		}
 
@@ -133,6 +138,12 @@ func (p *ImageProcessor) processImage(sourcePath string) ProcessingResult {
 		category = p.categorizeByMetadata(metadata)
 	}
 
+	// Videos default to their own "video" bucket rather than falling into
+	// the same generic category as uncategorized photos, unless something
+	// more specific (AI or keyword matching) already applied.
+	if (category == "general" || category == "uncategorized") && isVideoFile(strings.ToLower(filepath.Ext(sourcePath))) {
+		category = "video"
+	}
 	result.Category = category
 
 	// Generate new filename
@@ -166,7 +177,49 @@ func (p *ImageProcessor) processImage(sourcePath string) ProcessingResult {
 		slog.Warn("Failed to update database record", "error", err, "file", sourcePath)
 	}
 
+	p.backupFile(destPath)
+
 	return result
+}
+
+// backupCopyTimeout bounds how long a single destination's Copy can take,
+// so one slow or unreachable drive/cloud endpoint can't stall the whole
+// processing cycle indefinitely.
+const backupCopyTimeout = 5 * time.Minute
+
+// backupFile mirrors destPath (its current location under storageBaseDir)
+// to every configured backup.Destination, recording in the database which
+// ones succeeded (models.Image.BackedUpTo). A destination failing doesn't
+// affect the others or fail processing overall — the primary copy in
+// STORAGE_DIR already succeeded by the time this runs.
+func (p *ImageProcessor) backupFile(destPath string) {
+	if len(p.destinations) == 0 {
+		return
+	}
+
+	relativePath, err := filepath.Rel(p.storageBaseDir, destPath)
+	if err != nil {
+		slog.Error("Failed to compute backup relative path", "error", err, "file", destPath)
+		return
+	}
+
+	var succeeded []string
+	for _, dest := range p.destinations {
+		ctx, cancel := context.WithTimeout(context.Background(), backupCopyTimeout)
+		err := dest.Copy(ctx, relativePath, destPath)
+		cancel()
+
+		if err != nil {
+			slog.Warn("Backup destination failed", "destination", dest.Name(), "file", destPath, "error", err)
+			continue
+		}
+		slog.Info("Backed up file", "destination", dest.Name(), "file", destPath)
+		succeeded = append(succeeded, dest.Name())
+	}
+
+	if err := p.repo.UpdateBackupStatus(destPath, succeeded); err != nil {
+		slog.Warn("Failed to update backup status", "error", err, "file", destPath)
+	}
 }
 
 // ImageMetadata holds extracted image metadata
@@ -185,6 +238,12 @@ func (p *ImageProcessor) extractMetadata(imagePath string) (*ImageMetadata, erro
 	metadata := &ImageMetadata{
 		DateTime:     time.Now(),
 		OriginalName: filepath.Base(imagePath),
+	}
+
+	// Video files don't carry EXIF data — skip straight to file-system
+	// defaults instead of attempting (and always failing) an EXIF decode.
+	if isVideoFile(strings.ToLower(filepath.Ext(imagePath))) {
+		return metadata, nil
 	}
 
 	// Open file for EXIF reading
@@ -394,10 +453,16 @@ func (p *ImageProcessor) updateDatabaseRecord(oldPath, newPath, category string)
 	return nil
 }
 
-// isImageFile checks if a file extension is a supported image type. ext is
-// expected to already be lowercased (see ProcessAllImages).
-func isImageFile(ext string) bool {
-	return models.SupportedImageExtensions[ext]
+// isMediaFile checks if a file extension is a supported image or video
+// type. ext is expected to already be lowercased (see ProcessAllImages).
+func isMediaFile(ext string) bool {
+	return models.SupportedImageExtensions[ext] || models.SupportedVideoExtensions[ext]
+}
+
+// isVideoFile checks if a file extension is a supported video type. ext is
+// expected to already be lowercased.
+func isVideoFile(ext string) bool {
+	return models.SupportedVideoExtensions[ext]
 }
 
 // AICategorizationRequest is sent to AI service

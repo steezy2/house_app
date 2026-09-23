@@ -11,4 +11,9 @@ type ImageRepository interface {
 	// UpdateImagePath updates the storagePath, category, and processedAt of
 	// the image record whose storagePath currently equals oldStoragePath.
 	UpdateImagePath(oldStoragePath, newStoragePath, category string) error
+	// UpdateBackupStatus records which backup.Destination names have
+	// confirmed a copy of the image record whose storagePath currently
+	// equals storagePath (see backup.Destination and
+	// processor.processImage).
+	UpdateBackupStatus(storagePath string, backedUpTo []string) error
 }

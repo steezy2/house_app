@@ -130,6 +130,48 @@ func TestService_UploadImage_RejectsUnsupportedExtension(t *testing.T) {
 	}
 }
 
+func TestService_UploadImage_AcceptsVideo(t *testing.T) {
+	t.Cleanup(func() { os.RemoveAll("./uploads") })
+
+	var created models.Image
+	mockRepo := &mocks.ImageRepository{
+		CreateImageFunc: func(img models.Image) (*mongo.InsertOneResult, error) {
+			created = img
+			return &mongo.InsertOneResult{}, nil
+		},
+	}
+	svc := NewService(mockRepo)
+	file := newTestFileHeader(t, "clip.mp4", []byte("not a real video, just bytes"))
+
+	image, err := svc.UploadImage(file, nil)
+	if err != nil {
+		t.Fatalf("UploadImage failed for a video file: %v", err)
+	}
+	if created.ContentType != "video/mp4" {
+		t.Errorf("stored ContentType = %q, want %q", created.ContentType, "video/mp4")
+	}
+	if image.Filename != "clip.mp4" {
+		t.Errorf("Filename = %q, want %q", image.Filename, "clip.mp4")
+	}
+}
+
+func TestContentTypeForExt(t *testing.T) {
+	cases := map[string]string{
+		".jpg":  "image/jpeg",
+		".png":  "image/png",
+		".heic": "image/heic",
+		".mp4":  "video/mp4",
+		".mov":  "video/quicktime",
+		".webm": "video/webm",
+		".xyz":  "image/jpeg", // unrecognized falls back to the image default
+	}
+	for ext, want := range cases {
+		if got := contentTypeForExt(ext); got != want {
+			t.Errorf("contentTypeForExt(%q) = %q, want %q", ext, got, want)
+		}
+	}
+}
+
 func TestService_UploadImage_SanitizesFilename(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll("./uploads") })
 

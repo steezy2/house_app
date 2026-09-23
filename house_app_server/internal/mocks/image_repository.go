@@ -13,11 +13,12 @@ import (
 // Func field left unset returns a zero value instead of panicking, so a
 // test only needs to configure the methods it actually exercises.
 type ImageRepository struct {
-	CreateImageFunc     func(models.Image) (*mongo.InsertOneResult, error)
-	GetImagesFunc       func() ([]models.Image, error)
-	SearchImagesFunc    func(string) ([]models.Image, error)
-	CreateImagesFunc    func([]models.Image) (*mongo.InsertManyResult, error)
-	UpdateImagePathFunc func(oldStoragePath, newStoragePath, category string) error
+	CreateImageFunc        func(models.Image) (*mongo.InsertOneResult, error)
+	GetImagesFunc          func() ([]models.Image, error)
+	SearchImagesFunc       func(string) ([]models.Image, error)
+	CreateImagesFunc       func([]models.Image) (*mongo.InsertManyResult, error)
+	UpdateImagePathFunc    func(oldStoragePath, newStoragePath, category string) error
+	UpdateBackupStatusFunc func(storagePath string, backedUpTo []string) error
 }
 
 func (m *ImageRepository) CreateImage(img models.Image) (*mongo.InsertOneResult, error) {
@@ -53,6 +54,13 @@ func (m *ImageRepository) UpdateImagePath(oldStoragePath, newStoragePath, catego
 		return nil
 	}
 	return m.UpdateImagePathFunc(oldStoragePath, newStoragePath, category)
+}
+
+func (m *ImageRepository) UpdateBackupStatus(storagePath string, backedUpTo []string) error {
+	if m.UpdateBackupStatusFunc == nil {
+		return nil
+	}
+	return m.UpdateBackupStatusFunc(storagePath, backedUpTo)
 }
 
 var _ models.ImageRepository = (*ImageRepository)(nil)

@@ -6,10 +6,11 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// SupportedImageExtensions are the file extensions accepted for upload and
-// eligible for background processing — the single source of truth shared
-// by service.UploadImage/BulkUploadImages (which reject anything else) and
-// processor.isImageFile (which skips anything else).
+// SupportedImageExtensions are the image file extensions accepted for
+// upload and eligible for background processing — the single source of
+// truth shared by service.UploadImage/BulkUploadImages (which reject
+// anything not in this set or SupportedVideoExtensions) and
+// processor.isMediaFile (which skips anything else).
 var SupportedImageExtensions = map[string]bool{
 	".jpg":  true,
 	".jpeg": true,
@@ -21,7 +22,22 @@ var SupportedImageExtensions = map[string]bool{
 	".heif": true,
 }
 
-// Image represents an image entry in the database
+// SupportedVideoExtensions are the video file extensions accepted
+// alongside SupportedImageExtensions, covering the common formats phone
+// cameras record in (iOS: .mov/.mp4, Android: .mp4/.3gp/.webm).
+var SupportedVideoExtensions = map[string]bool{
+	".mp4":  true,
+	".mov":  true,
+	".m4v":  true,
+	".3gp":  true,
+	".webm": true,
+	".avi":  true,
+}
+
+// Image represents an image or video entry in the database. The name
+// predates video support (see MIGRATION_SUMMARY.md/CLAUDE.md) — kept as-is
+// to avoid an invasive rename of the collection, routes, and Swagger docs
+// for no functional benefit.
 type Image struct {
 	ID           primitive.ObjectID `bson:"_id,omitempty" json:"id,omitempty"`
 	Filename     string             `bson:"filename" json:"filename"`
@@ -34,6 +50,13 @@ type Image struct {
 	Metadata     interface{}        `bson:"metadata,omitempty" json:"metadata,omitempty"`
 	CreatedAt    time.Time          `bson:"createdAt" json:"createdAt"`
 	ProcessedAt  time.Time          `bson:"processedAt,omitempty" json:"processedAt,omitempty"`
+	// BackedUpTo lists the names of configured backup.Destinations that
+	// have confirmed a copy of this file (see processor.processImage).
+	// Partial credit is expected: if 2 of 3 configured destinations
+	// succeeded, this has 2 entries. A future delete-from-phone feature
+	// should check this covers every configured destination before
+	// treating a file as safe to remove from the source device.
+	BackedUpTo []string `bson:"backedUpTo,omitempty" json:"backedUpTo,omitempty"`
 }
 
 // BulkUploadRequest represents the request body for bulk image upload

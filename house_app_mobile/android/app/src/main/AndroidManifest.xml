@@ -1,4 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Android 13+ (API 33+) granular media permissions, needed for the
+         "Upload All" full-camera-roll flow (see lib/services/media_library.dart).
+         photo_manager's own manifest only covers READ_EXTERNAL_STORAGE up
+         to API 32 — these must be declared here for anything newer. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
     <application
         android:label="house_app_mobile"
         android:name="${applicationName}"

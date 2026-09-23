@@ -137,6 +137,16 @@ func (r *MongoRepo) UpdateImagePath(oldStoragePath, newStoragePath, category str
 	return err
 }
 
+// UpdateBackupStatus records which backup.Destination names have
+// confirmed a copy of the image record whose storagePath currently equals
+// storagePath. Like UpdateImagePath, it's a no-op if no record matches.
+func (r *MongoRepo) UpdateBackupStatus(storagePath string, backedUpTo []string) error {
+	filter := bson.M{"storagePath": storagePath}
+	update := bson.M{"$set": bson.M{"backedUpTo": backedUpTo}}
+	_, err := r.collection.UpdateOne(context.Background(), filter, update)
+	return err
+}
+
 // CreateImages creates multiple new image records in the database.
 func (r *MongoRepo) CreateImages(images []models.Image) (*mongo.InsertManyResult, error) {
 	var docs []interface{}

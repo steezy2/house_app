@@ -4,17 +4,20 @@ This is the backend server for the House App. It is a Go application that provid
 
 ## Features
 
-*   Image upload and management (single and bulk)
-*   Search functionality for images by filename and tags
+*   Image and video upload and management (single and bulk)
+*   Search functionality by filename and tags
 *   MongoDB storage for metadata
 *   RESTful API with Swagger documentation
-*   Support for multiple image formats (JPEG, PNG, GIF, BMP, WebP)
+*   Support for common image (JPEG, PNG, GIF, BMP, WebP, HEIC/HEIF) and
+    video (MP4, MOV, M4V, 3GP, WebM, AVI) formats
+*   Backup redundancy to any number of local/network drives and/or
+    S3-compatible cloud storage (see [backup/](backup))
 
 ## Getting Started
 
 ### Prerequisites
 
-*   Go 1.21+
+*   Go 1.24+ (bumped from 1.21 by the AWS SDK dependency backup/ uses)
 *   MongoDB
 *   Make (optional)
 
@@ -28,11 +31,14 @@ This is the backend server for the House App. It is a Go application that provid
 
 2.  Create a `.env` file in this directory (copy `.env.example`). At
     minimum set `MONGO_URI`; also set `API_KEY` if you want the API to
-    require authentication (recommended — see below):
+    require authentication (recommended), and at least one `BACKUP_*`
+    variable if you don't want uploaded files living only in `STORAGE_DIR`
+    with no redundancy (also recommended — see [backup/](backup)):
 
     ```env
     MONGO_URI=mongodb://localhost:27017
     API_KEY=some-shared-secret
+    BACKUP_LOCAL_DIRS=D:/house_app_backup
     ```
 
 ### Running the Server
@@ -100,10 +106,13 @@ is not gated.
 
 A separate `processor/` package (started from `main.go`, not from the
 `controller` package above) polls `UPLOAD_DIR` on a timer, moves files
-into `STORAGE_DIR/YYYY/MM/category/`, and updates each image's database
-record to the new path. See [../IMAGE_PROCESSING.md](../IMAGE_PROCESSING.md)
-for configuration and [../README.md#future-enhancements](../README.md#future-enhancements)
-for remaining known gaps (e.g. AI categorization is still a stub).
+into `STORAGE_DIR/YYYY/MM/category/`, mirrors each file to every
+configured `backup.Destination` (see [backup/](backup) and
+[../README.md#backup--redundancy](../README.md#backup--redundancy)), and
+updates each image's database record with the new path and backup status.
+See [../IMAGE_PROCESSING.md](../IMAGE_PROCESSING.md) for configuration and
+[../README.md#future-enhancements](../README.md#future-enhancements) for
+remaining known gaps (e.g. AI categorization is still a stub).
 
 ## Building
 

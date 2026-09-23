@@ -64,9 +64,17 @@ func APIKeyMiddleware(apiKey string) gin.HandlerFunc {
 	}
 }
 
+// maxMultipartMemory raises Gin's default 32 MiB threshold for how much of
+// a multipart request body it buffers in memory before spilling the rest
+// to temp files. Video uploads routinely exceed 32 MiB, so the default
+// would push nearly every video-containing batch through disk spooling;
+// this doesn't cap request size, just how soon that spooling kicks in.
+const maxMultipartMemory = 200 << 20 // 200 MiB
+
 // NewAPIServer creates a new API server
 func NewAPIServer(service *service.Service) *APIServer {
 	router := gin.Default()
+	router.MaxMultipartMemory = maxMultipartMemory
 
 	// Add CORS middleware
 	router.Use(CORSMiddleware())
