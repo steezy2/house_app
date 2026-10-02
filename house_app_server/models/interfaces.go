@@ -16,4 +16,10 @@ type ImageRepository interface {
 	// equals storagePath (see backup.Destination and
 	// processor.processImage).
 	UpdateBackupStatus(storagePath string, backedUpTo []string) error
+	// FindImagesMissingBackup returns up to limit processed image records
+	// whose BackedUpTo doesn't include destination.
+	FindImagesMissingBackup(destination string, limit int64) ([]Image, error)
+	// AddBackupDestination adds destination to BackedUpTo of the image
+	// record whose storagePath currently equals storagePath.
+	AddBackupDestination(storagePath, destination string) error
 }

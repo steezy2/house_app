@@ -239,6 +239,11 @@ configure (`BACKUP_LOCAL_DIRS`), an optional S3-compatible cloud bucket
 unplugged, bucket unreachable) is logged as a warning and doesn't affect
 the others or the primary copy; each image's database record tracks which
 destination names actually confirmed a copy in its `backedUpTo` array.
+After each processing cycle, the processor retries every destination a
+file's `backedUpTo` doesn't list yet (up to 200 files per destination per
+cycle, pausing a destination after 3 failures in a row), so a drive that
+was offline catches up once it's back, and a newly added drive is
+backfilled with everything already in `STORAGE_DIR`.
 
 This exists because `STORAGE_DIR` is otherwise a single point of failure —
 MongoDB (wherever it's hosted) only holds metadata, never the file bytes.
@@ -460,9 +465,6 @@ with no redundancy — see [Backup & Redundancy](#backup--redundancy) below.
   breaks every other client too, not just that device.
 - [ ] **No chunked/resumable upload** — a single large video or an
   oversized batch that fails partway through must be retried from scratch.
-- [ ] **No backfill for pre-existing `STORAGE_DIR` content** into
-  newly-added backup destinations — only files processed going forward get
-  mirrored.
 - [ ] **Delete-from-phone is not built yet** — planned as a mobile feature
   once `backedUpTo` can be trusted to cover every configured backup
   destination for a given file; deleting originals before that would risk

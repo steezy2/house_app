@@ -2,6 +2,7 @@ package clients
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -143,6 +144,43 @@ func (r *MongoRepo) UpdateImagePath(oldStoragePath, newStoragePath, category str
 func (r *MongoRepo) UpdateBackupStatus(storagePath string, backedUpTo []string) error {
 	filter := bson.M{"storagePath": storagePath}
 	update := bson.M{"$set": bson.M{"backedUpTo": backedUpTo}}
+	_, err := r.collection.UpdateOne(context.Background(), filter, update)
+	return err
+}
+
+// FindImagesMissingBackup returns up to limit randomly chosen processed
+// image records (processedAt set, so storagePath points into STORAGE_DIR)
+// whose backedUpTo doesn't include destination. Random, so files that keep
+// failing (or are gone from disk) can't hold every other file back by
+// always filling the batch.
+func (r *MongoRepo) FindImagesMissingBackup(destination string, limit int64) ([]models.Image, error) {
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{
+			"processedAt": bson.M{"$gt": time.Time{}},
+			"backedUpTo":  bson.M{"$ne": destination},
+		}}},
+		{{Key: "$sample", Value: bson.M{"size": limit}}},
+	}
+
+	cursor, err := r.collection.Aggregate(context.Background(), pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("finding images missing backup to %s: %w", destination, err)
+	}
+	defer cursor.Close(context.Background())
+
+	var images []models.Image
+	if err := cursor.All(context.Background(), &images); err != nil {
+		return nil, fmt.Errorf("decoding images missing backup to %s: %w", destination, err)
+	}
+	return images, nil
+}
+
+// AddBackupDestination adds destination to backedUpTo of the image record
+// whose storagePath currently equals storagePath, leaving the other entries
+// alone. Like UpdateBackupStatus, it's a no-op if no record matches.
+func (r *MongoRepo) AddBackupDestination(storagePath, destination string) error {
+	filter := bson.M{"storagePath": storagePath}
+	update := bson.M{"$addToSet": bson.M{"backedUpTo": destination}}
 	_, err := r.collection.UpdateOne(context.Background(), filter, update)
 	return err
 }

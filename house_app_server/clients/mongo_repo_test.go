@@ -114,3 +114,45 @@ func TestMongoRepo_GetImages(t *testing.T) {
 		}
 	})
 }
+
+func TestMongoRepo_FindImagesMissingBackup(t *testing.T) {
+	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
+	defer mt.Close()
+
+	mt.Run("success", func(mt *mtest.T) {
+		repo := &MongoRepo{collection: mt.Coll}
+
+		mt.AddMockResponses(mtest.CreateCursorResponse(0, "test.images", mtest.FirstBatch, bson.D{
+			{Key: "_id", Value: primitive.NewObjectID()},
+			{Key: "storagePath", Value: "E:/house_app_storage/2025/10/travel/travel_photo.jpg"},
+			{Key: "backedUpTo", Value: bson.A{"D:/backup1"}},
+		}))
+
+		images, err := repo.FindImagesMissingBackup("s3:house-app-backup", 200)
+		if err != nil {
+			t.Fatalf("FindImagesMissingBackup failed: %v", err)
+		}
+		if len(images) != 1 || images[0].StoragePath != "E:/house_app_storage/2025/10/travel/travel_photo.jpg" {
+			t.Errorf("images = %+v, want the one stored photo", images)
+		}
+	})
+}
+
+func TestMongoRepo_AddBackupDestination(t *testing.T) {
+	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
+	defer mt.Close()
+
+	mt.Run("success", func(mt *mtest.T) {
+		repo := &MongoRepo{collection: mt.Coll}
+
+		mt.AddMockResponses(bson.D{
+			{Key: "ok", Value: 1},
+			{Key: "n", Value: 1},
+			{Key: "nModified", Value: 1},
+		})
+
+		if err := repo.AddBackupDestination("E:/house_app_storage/2025/10/travel/travel_photo.jpg", "s3:house-app-backup"); err != nil {
+			t.Errorf("AddBackupDestination failed: %v", err)
+		}
+	})
+}

@@ -7,21 +7,26 @@ import 'package:provider/provider.dart';
 import '../../api/api.dart';
 import '../../models/bulk_upload_result.dart';
 import '../../services/media_library.dart';
+import '../../services/uploaded_assets_store.dart';
 import '../../state/settings_state.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/batching.dart';
 import '../../utils/error_message.dart';
+import '../../utils/upload_results.dart';
 import '../../widgets/not_configured_banner.dart';
 
 /// The primary screen: pick photos from the gallery, optionally tag them,
 /// and upload them all in one tap — the "select photos and upload" flow
 /// this whole app exists for.
 class UploadScreen extends StatefulWidget {
-  const UploadScreen({super.key, this.mediaLibrary});
+  const UploadScreen({super.key, this.mediaLibrary, this.uploadedAssets});
 
   /// Overridable for tests; defaults to a real [MediaLibrary] backed by
   /// `photo_manager`'s platform channels.
   final MediaLibrary? mediaLibrary;
+
+  /// Overridable for tests; defaults to the file-backed store.
+  final UploadedAssetsStore? uploadedAssets;
 
   @override
   State<UploadScreen> createState() => _UploadScreenState();
@@ -31,6 +36,7 @@ class _UploadScreenState extends State<UploadScreen> {
   final _picker = ImagePicker();
   final _tagsController = TextEditingController();
   late final MediaLibrary _mediaLibrary;
+  late final UploadedAssetsStore _uploadedAssets;
 
   List<XFile> _selected = [];
   bool _uploading = false;
@@ -47,6 +53,7 @@ class _UploadScreenState extends State<UploadScreen> {
   void initState() {
     super.initState();
     _mediaLibrary = widget.mediaLibrary ?? MediaLibrary();
+    _uploadedAssets = widget.uploadedAssets ?? UploadedAssetsStore();
   }
 
   @override
@@ -75,9 +82,7 @@ class _UploadScreenState extends State<UploadScreen> {
     if (_selected.isEmpty) return;
     final settings = context.read<SettingsState>();
     if (!settings.isConfigured) {
-      setState(
-        () => _error = 'Set your server address in Settings first.',
-      );
+      setState(() => _error = 'Set your server address in Settings first.');
       return;
     }
 
@@ -136,18 +141,22 @@ class _UploadScreenState extends State<UploadScreen> {
       _massUploadResult = null;
     });
 
-    final assets = await _mediaLibrary.getAllAssets();
+    final uploaded = await _uploadedAssets.load();
+    final assets = await _mediaLibrary.getAllAssets(exclude: uploaded);
     if (!mounted) return;
 
     if (assets.isEmpty) {
       setState(
-        () => _massUploadError = 'No photos or videos found on this device.',
+        () => _massUploadError = uploaded.isEmpty
+            ? 'No photos or videos found on this device.'
+            : 'Everything on this device is already uploaded.',
       );
       return;
     }
 
     final confirmed = await _confirmMassUpload(
       count: assets.length,
+      onlyNew: uploaded.isNotEmpty,
       limitedAccess: access == MediaAccessResult.limited,
     );
     if (!mounted || !confirmed) return;
@@ -159,19 +168,20 @@ class _UploadScreenState extends State<UploadScreen> {
     });
 
     final tags = _parseTagsInput();
-    final batches = batchIndicesBySize(
-      assets.map((a) => a.sizeBytes).toList(),
-    );
+    final batches = batchIndicesBySize(assets.map((a) => a.sizeBytes).toList());
 
     try {
       final api = context.read<Api>();
       final results = <BulkUploadResult>[];
       for (final batchIndices in batches) {
-        final batchFiles = [for (final i in batchIndices) assets[i].file];
-        final result = await api.images.uploadImages(batchFiles, tags: tags);
+        final batch = [for (final i in batchIndices) assets[i]];
+        final result = await api.images.uploadImages([
+          for (final asset in batch) asset.file,
+        ], tags: tags);
         results.add(result);
+        await _uploadedAssets.addAll(succeededAssetIds(batch, result));
         if (!mounted) return;
-        setState(() => _massUploadCompleted += batchFiles.length);
+        setState(() => _massUploadCompleted += batch.length);
       }
       if (!mounted) return;
       setState(() => _massUploadResult = _combineResults(results));
@@ -191,15 +201,17 @@ class _UploadScreenState extends State<UploadScreen> {
 
   Future<bool> _confirmMassUpload({
     required int count,
+    required bool onlyNew,
     required bool limitedAccess,
   }) async {
+    final items = count == 1 ? 'photo or video' : 'photos and videos';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Upload everything?'),
         content: Text(
-          'This uploads all $count photo${count == 1 ? '' : 's'} and '
-          'video${count == 1 ? '' : 's'} ${limitedAccess ? 'you\'ve given House App access to' : 'on this device'} '
+          'This uploads ${onlyNew ? '$count new $items' : 'all $count $items'} '
+          '${limitedAccess ? 'you\'ve given House App access to' : 'on this device'} '
           'to your House App server. It may take a while and use a lot of '
           'data — nothing is deleted from this device.'
           '${limitedAccess ? '\n\nYou\'ve only granted access to some photos (iOS\'s "Limited Photos" mode) — this will not be everything on your device unless you allow full access in Settings.' : ''}',
@@ -309,9 +321,7 @@ class _UploadScreenState extends State<UploadScreen> {
               onPressed: _massUploading ? null : _uploadAll,
               icon: const Icon(Icons.cloud_upload_outlined),
               label: Text(
-                _massUploading
-                    ? 'Uploading...'
-                    : 'Upload All Photos & Videos',
+                _massUploading ? 'Uploading...' : 'Upload All Photos & Videos',
               ),
             ),
             if (_massUploading) ...[

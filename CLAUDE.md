@@ -99,6 +99,10 @@ anywhere.
   logged as a warning in `processor.backupFile` and does not fail
   processing or affect other destinations — the primary copy in
   `STORAGE_DIR` already succeeded by the time backup runs.
+  `processor.RetryMissingBackups` runs after every processing cycle and
+  copies each processed file to the destinations its `BackedUpTo` is
+  missing (`repo.FindImagesMissingBackup` / `AddBackupDestination`), so a
+  destination's `Name()` must stay stable or everything gets re-copied.
   `models.Image.BackedUpTo` only lists destinations that actually
   confirmed a copy, matched by the *current* `storagePath` (same
   match-by-storagePath pattern as `UpdateImagePath`). A delete-from-phone
@@ -168,6 +172,13 @@ anywhere.
   `UploadScreen(mediaLibrary: ...)` is constructor-injectable specifically
   so tests can supply a `FakeMediaLibrary` instead of hitting real
   platform channels.
+- **"Upload All" skips assets already uploaded**, by `photo_manager` asset
+  id, recorded per batch in `lib/services/uploaded_assets_store.dart` (a
+  plain file, one id per line). Only ids the server didn't list in
+  `failedFiles` are recorded (`utils/upload_results.dart`). The record is
+  per install: reinstalling the app or wiping the server's storage means
+  the next "Upload All" sends everything again. Widget tests inject
+  `FakeUploadedAssetsStore`.
 - **`lib/utils/batching.dart`'s `batchIndicesBySize`** caps each upload
   batch at ≤20 files or ≤150MB combined (whichever comes first) — it's a
   pure function operating on a list of byte sizes and returning index

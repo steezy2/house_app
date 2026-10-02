@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## 2026-10-02
 
+### Added
+- **Backup retries and backfill**: after every processing cycle,
+  `processor.RetryMissingBackups` copies each processed file to the
+  destinations its `BackedUpTo` doesn't list yet (200 files per
+  destination per cycle; a destination pauses after 3 failures in a row).
+  A drive that was offline catches up, and a newly added drive gets every
+  file already stored. New repo methods `FindImagesMissingBackup` and
+  `AddBackupDestination` (`$addToSet`).
+- **Mobile "Upload All" only sends new photos and videos.** Asset ids that
+  reached the server are recorded per batch
+  (`lib/services/uploaded_assets_store.dart`) and skipped next time,
+  before their files are resolved, so a second run doesn't re-upload the
+  camera roll and an interrupted run resumes. The dialog says "N new
+  photos and videos", or "Everything on this device is already uploaded."
+
 ### Fixed
 - **Local backups can't record a truncated copy as backed up.**
   `backup.LocalDestination.Copy` now writes to a temp file, syncs and

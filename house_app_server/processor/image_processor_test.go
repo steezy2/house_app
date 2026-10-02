@@ -11,6 +11,7 @@ import (
 
 	"house-app/backup"
 	"house-app/internal/mocks"
+	"house-app/models"
 )
 
 // fakeDestination is a minimal backup.Destination test double that records
@@ -321,5 +322,113 @@ func TestBackupFile_NoDestinationsConfiguredSkipsUpdate(t *testing.T) {
 
 	if called {
 		t.Error("expected UpdateBackupStatus not to be called when no destinations are configured")
+	}
+}
+
+// writeStoredFile creates a file under storageDir at the given relative
+// path and returns its full path.
+func writeStoredFile(t *testing.T, storageDir, relativePath string) string {
+	t.Helper()
+	path := filepath.Join(storageDir, relativePath)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("failed to create storage subdirectory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("bytes"), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+	return path
+}
+
+func TestRetryMissingBackups_CopiesOnlyToMissingDestinations(t *testing.T) {
+	storageDir := t.TempDir()
+	path := writeStoredFile(t, storageDir, filepath.Join("2026", "08", "travel", "photo.jpg"))
+
+	haveDest := &fakeDestination{name: "D:/backup1"}
+	missingDest := &fakeDestination{name: "s3:bucket"}
+
+	var added []string
+	repo := &mocks.ImageRepository{
+		FindImagesMissingBackupFunc: func(destination string, limit int64) ([]models.Image, error) {
+			if destination == "s3:bucket" {
+				return []models.Image{{StoragePath: path, BackedUpTo: []string{"D:/backup1"}}}, nil
+			}
+			return nil, nil
+		},
+		AddBackupDestinationFunc: func(storagePath, destination string) error {
+			added = append(added, storagePath+"|"+destination)
+			return nil
+		},
+	}
+	p := &ImageProcessor{storageBaseDir: storageDir, repo: repo, destinations: []backup.Destination{haveDest, missingDest}}
+
+	p.RetryMissingBackups()
+
+	if len(haveDest.calls) != 0 {
+		t.Errorf("haveDest.calls = %+v, want none", haveDest.calls)
+	}
+	wantRelative := filepath.Join("2026", "08", "travel", "photo.jpg")
+	if len(missingDest.calls) != 1 || missingDest.calls[0].relativePath != wantRelative {
+		t.Errorf("missingDest.calls = %+v, want one call with relativePath %q", missingDest.calls, wantRelative)
+	}
+	if !reflect.DeepEqual(added, []string{path + "|s3:bucket"}) {
+		t.Errorf("AddBackupDestination calls = %v, want [%s|s3:bucket]", added, path)
+	}
+}
+
+func TestRetryMissingBackups_StopsDestinationAfterRepeatedFailures(t *testing.T) {
+	storageDir := t.TempDir()
+	var images []models.Image
+	for _, name := range []string{"a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg"} {
+		images = append(images, models.Image{StoragePath: writeStoredFile(t, storageDir, name)})
+	}
+
+	downDest := &fakeDestination{name: "E:/offline", failErr: errors.New("drive not mounted")}
+	addCalled := false
+	repo := &mocks.ImageRepository{
+		FindImagesMissingBackupFunc: func(string, int64) ([]models.Image, error) { return images, nil },
+		AddBackupDestinationFunc: func(string, string) error {
+			addCalled = true
+			return nil
+		},
+	}
+	p := &ImageProcessor{storageBaseDir: storageDir, repo: repo, destinations: []backup.Destination{downDest}}
+
+	p.RetryMissingBackups()
+
+	if len(downDest.calls) != maxConsecutiveBackupFailures {
+		t.Errorf("downDest got %d Copy calls, want %d before giving up for this cycle", len(downDest.calls), maxConsecutiveBackupFailures)
+	}
+	if addCalled {
+		t.Error("expected no AddBackupDestination call when every copy failed")
+	}
+}
+
+func TestRetryMissingBackups_SkipsFilesMissingFromStorage(t *testing.T) {
+	storageDir := t.TempDir()
+	var images []models.Image
+	for i := 0; i < maxConsecutiveBackupFailures; i++ {
+		images = append(images, models.Image{StoragePath: filepath.Join(storageDir, "gone", string(rune('a'+i))+".jpg")})
+	}
+	present := writeStoredFile(t, storageDir, "present.jpg")
+	images = append(images, models.Image{StoragePath: present})
+
+	dest := &fakeDestination{name: "D:/backup1"}
+	var added []string
+	repo := &mocks.ImageRepository{
+		FindImagesMissingBackupFunc: func(string, int64) ([]models.Image, error) { return images, nil },
+		AddBackupDestinationFunc: func(storagePath, destination string) error {
+			added = append(added, storagePath)
+			return nil
+		},
+	}
+	p := &ImageProcessor{storageBaseDir: storageDir, repo: repo, destinations: []backup.Destination{dest}}
+
+	p.RetryMissingBackups()
+
+	if len(dest.calls) != 1 {
+		t.Errorf("dest got %d Copy calls, want 1 (missing files skipped, not counted as destination failures)", len(dest.calls))
+	}
+	if !reflect.DeepEqual(added, []string{present}) {
+		t.Errorf("AddBackupDestination calls = %v, want [%s]", added, present)
 	}
 }

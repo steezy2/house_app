@@ -18,8 +18,12 @@ the equivalent curl calls.
     and uploads them all, split into batches of ≤20 files or ≤150MB
     (whichever comes first) so a single request doesn't try to send an
     unbounded amount of data. Shows a confirmation dialog with the asset
-    count before starting, and a progress bar during upload. See
-    `lib/services/media_library.dart` and `lib/utils/batching.dart`.
+    count before starting, and a progress bar during upload. The app
+    remembers which assets reached the server
+    (`lib/services/uploaded_assets_store.dart`), so pressing it again
+    only uploads new photos and videos, and an interrupted run resumes
+    where it stopped. See `lib/services/media_library.dart` and
+    `lib/utils/batching.dart`.
     **This does not delete anything from the device** — see
     [Future Enhancements](../README.md#future-enhancements) for the
     planned (not yet built) delete-after-verified-backup step.

@@ -13,12 +13,14 @@ import (
 // Func field left unset returns a zero value instead of panicking, so a
 // test only needs to configure the methods it actually exercises.
 type ImageRepository struct {
-	CreateImageFunc        func(models.Image) (*mongo.InsertOneResult, error)
-	GetImagesFunc          func() ([]models.Image, error)
-	SearchImagesFunc       func(string) ([]models.Image, error)
-	CreateImagesFunc       func([]models.Image) (*mongo.InsertManyResult, error)
-	UpdateImagePathFunc    func(oldStoragePath, newStoragePath, category string) error
-	UpdateBackupStatusFunc func(storagePath string, backedUpTo []string) error
+	CreateImageFunc             func(models.Image) (*mongo.InsertOneResult, error)
+	GetImagesFunc               func() ([]models.Image, error)
+	SearchImagesFunc            func(string) ([]models.Image, error)
+	CreateImagesFunc            func([]models.Image) (*mongo.InsertManyResult, error)
+	UpdateImagePathFunc         func(oldStoragePath, newStoragePath, category string) error
+	UpdateBackupStatusFunc      func(storagePath string, backedUpTo []string) error
+	FindImagesMissingBackupFunc func(destination string, limit int64) ([]models.Image, error)
+	AddBackupDestinationFunc    func(storagePath, destination string) error
 }
 
 func (m *ImageRepository) CreateImage(img models.Image) (*mongo.InsertOneResult, error) {
@@ -61,6 +63,20 @@ func (m *ImageRepository) UpdateBackupStatus(storagePath string, backedUpTo []st
 		return nil
 	}
 	return m.UpdateBackupStatusFunc(storagePath, backedUpTo)
+}
+
+func (m *ImageRepository) FindImagesMissingBackup(destination string, limit int64) ([]models.Image, error) {
+	if m.FindImagesMissingBackupFunc == nil {
+		return nil, nil
+	}
+	return m.FindImagesMissingBackupFunc(destination, limit)
+}
+
+func (m *ImageRepository) AddBackupDestination(storagePath, destination string) error {
+	if m.AddBackupDestinationFunc == nil {
+		return nil
+	}
+	return m.AddBackupDestinationFunc(storagePath, destination)
 }
 
 var _ models.ImageRepository = (*ImageRepository)(nil)

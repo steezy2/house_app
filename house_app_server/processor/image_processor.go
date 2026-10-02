@@ -55,7 +55,7 @@ func (p *ImageProcessor) StartPeriodicProcessing(ctx context.Context, interval t
 	slog.Info("Started periodic image processing", "interval", interval, "uploadDir", p.uploadDir, "storageDir", p.storageBaseDir)
 
 	// Run immediately on start
-	p.ProcessAllImages()
+	p.runCycle()
 
 	for {
 		select {
@@ -63,9 +63,16 @@ func (p *ImageProcessor) StartPeriodicProcessing(ctx context.Context, interval t
 			slog.Info("Stopping periodic image processing")
 			return
 		case <-ticker.C:
-			p.ProcessAllImages()
+			p.runCycle()
 		}
 	}
+}
+
+// runCycle processes new uploads first, then retries missing backups, so a
+// backup backlog never delays organizing new files.
+func (p *ImageProcessor) runCycle() {
+	p.ProcessAllImages()
+	p.RetryMissingBackups()
 }
 
 // ProcessAllImages processes all images in the upload directory
@@ -197,19 +204,9 @@ func (p *ImageProcessor) backupFile(destPath string) {
 		return
 	}
 
-	relativePath, err := filepath.Rel(p.storageBaseDir, destPath)
-	if err != nil {
-		slog.Error("Failed to compute backup relative path", "error", err, "file", destPath)
-		return
-	}
-
 	var succeeded []string
 	for _, dest := range p.destinations {
-		ctx, cancel := context.WithTimeout(context.Background(), backupCopyTimeout)
-		err := dest.Copy(ctx, relativePath, destPath)
-		cancel()
-
-		if err != nil {
+		if err := p.copyToDestination(dest, destPath); err != nil {
 			slog.Warn("Backup destination failed", "destination", dest.Name(), "file", destPath, "error", err)
 			continue
 		}
@@ -219,6 +216,64 @@ func (p *ImageProcessor) backupFile(destPath string) {
 
 	if err := p.repo.UpdateBackupStatus(destPath, succeeded); err != nil {
 		slog.Warn("Failed to update backup status", "error", err, "file", destPath)
+	}
+}
+
+// copyToDestination copies storagePath (a file under storageBaseDir) to
+// dest under the same relative path, bounded by backupCopyTimeout.
+func (p *ImageProcessor) copyToDestination(dest backup.Destination, storagePath string) error {
+	relativePath, err := filepath.Rel(p.storageBaseDir, storagePath)
+	if err != nil || !filepath.IsLocal(relativePath) {
+		return fmt.Errorf("file %s is not under storage dir %s", storagePath, p.storageBaseDir)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), backupCopyTimeout)
+	defer cancel()
+	return dest.Copy(ctx, relativePath, storagePath)
+}
+
+// backupRetryBatchSize caps how many files RetryMissingBackups tries per
+// destination per cycle, so a large backfill (e.g. a newly added drive)
+// spreads over several cycles instead of delaying new uploads for hours.
+const backupRetryBatchSize = 200
+
+// maxConsecutiveBackupFailures is how many copies in a row may fail before
+// RetryMissingBackups gives up on a destination until the next cycle: it's
+// probably offline, and each attempt could take up to backupCopyTimeout.
+const maxConsecutiveBackupFailures = 3
+
+// RetryMissingBackups copies processed files to every configured
+// destination their BackedUpTo doesn't list yet: copies that failed at
+// processing time, and files stored before a destination was added.
+// Files no longer in STORAGE_DIR are skipped without counting against the
+// destination.
+func (p *ImageProcessor) RetryMissingBackups() {
+	for _, dest := range p.destinations {
+		images, err := p.repo.FindImagesMissingBackup(dest.Name(), backupRetryBatchSize)
+		if err != nil {
+			slog.Error("Failed to find images missing backup", "destination", dest.Name(), "error", err)
+			continue
+		}
+
+		failures := 0
+		for _, img := range images {
+			if _, err := os.Stat(img.StoragePath); err != nil {
+				slog.Warn("Skipping backup retry for missing file", "file", img.StoragePath, "error", err)
+				continue
+			}
+			if err := p.copyToDestination(dest, img.StoragePath); err != nil {
+				slog.Warn("Backup retry failed", "destination", dest.Name(), "file", img.StoragePath, "error", err)
+				if failures++; failures >= maxConsecutiveBackupFailures {
+					slog.Warn("Pausing backup retries for this cycle", "destination", dest.Name())
+					break
+				}
+				continue
+			}
+			failures = 0
+			if err := p.repo.AddBackupDestination(img.StoragePath, dest.Name()); err != nil {
+				slog.Warn("Failed to record backup", "destination", dest.Name(), "file", img.StoragePath, "error", err)
+			}
+		}
 	}
 }
 

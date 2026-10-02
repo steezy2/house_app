@@ -5,10 +5,12 @@ import 'package:http/testing.dart';
 import 'package:house_app_mobile/api/api.dart';
 import 'package:house_app_mobile/screens/upload/upload_screen.dart';
 import 'package:house_app_mobile/services/media_library.dart';
+import 'package:house_app_mobile/services/uploaded_assets_store.dart';
 import 'package:house_app_mobile/state/settings_state.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
+import '../fakes/fake_uploaded_assets_store.dart';
 import '../test_helpers.dart';
 
 /// Note: this deliberately never exercises a real upload through
@@ -30,13 +32,16 @@ class FakeMediaLibrary implements MediaLibrary {
   Future<MediaAccessResult> requestAccess() async => accessResult;
 
   @override
-  Future<List<ResolvedAsset>> getAllAssets() async => assets;
+  Future<List<ResolvedAsset>> getAllAssets({
+    Set<String> exclude = const {},
+  }) async => assets.where((a) => !exclude.contains(a.id)).toList();
 }
 
 Future<void> _pumpUploadScreen(
   WidgetTester tester, {
   required MediaLibrary mediaLibrary,
   required http.Client httpClient,
+  UploadedAssetsStore? uploadedAssets,
 }) async {
   final storage = await configuredStorage(apiKey: 'secret-key');
   final settingsState = SettingsState(storage);
@@ -49,7 +54,12 @@ Future<void> _pumpUploadScreen(
         Provider<Api>.value(value: api),
         ChangeNotifierProvider<SettingsState>.value(value: settingsState),
       ],
-      child: MaterialApp(home: UploadScreen(mediaLibrary: mediaLibrary)),
+      child: MaterialApp(
+        home: UploadScreen(
+          mediaLibrary: mediaLibrary,
+          uploadedAssets: uploadedAssets ?? FakeUploadedAssetsStore(),
+        ),
+      ),
     ),
   );
   await tester.pumpAndSettle();
@@ -97,8 +107,8 @@ void main() {
       accessResult: MediaAccessResult.full,
       // Paths don't need to exist — canceling never reads them.
       assets: [
-        ResolvedAsset(file: XFile('a.jpg'), sizeBytes: 3),
-        ResolvedAsset(file: XFile('b.mp4'), sizeBytes: 3),
+        ResolvedAsset(id: 'id-a', file: XFile('a.jpg'), sizeBytes: 3),
+        ResolvedAsset(id: 'id-b', file: XFile('b.mp4'), sizeBytes: 3),
       ],
     );
 
@@ -128,7 +138,7 @@ void main() {
     (tester) async {
       final mediaLibrary = FakeMediaLibrary(
         accessResult: MediaAccessResult.limited,
-        assets: [ResolvedAsset(file: XFile('a.jpg'), sizeBytes: 3)],
+        assets: [ResolvedAsset(id: 'id-a', file: XFile('a.jpg'), sizeBytes: 3)],
       );
 
       await _pumpUploadScreen(
@@ -148,4 +158,51 @@ void main() {
       await tester.pumpAndSettle();
     },
   );
+
+  testWidgets('offers only assets that were not uploaded before', (
+    tester,
+  ) async {
+    await _pumpUploadScreen(
+      tester,
+      mediaLibrary: FakeMediaLibrary(
+        accessResult: MediaAccessResult.full,
+        assets: [
+          ResolvedAsset(id: 'id-a', file: XFile('a.jpg'), sizeBytes: 3),
+          ResolvedAsset(id: 'id-b', file: XFile('b.mp4'), sizeBytes: 3),
+        ],
+      ),
+      httpClient: MockClient(
+        (request) async => fail('should not call the network on cancel'),
+      ),
+      uploadedAssets: FakeUploadedAssetsStore({'id-a'}),
+    );
+
+    await tester.tap(find.text('Upload All Photos & Videos'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('1 new photo or video'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('says so when everything is already uploaded', (tester) async {
+    await _pumpUploadScreen(
+      tester,
+      mediaLibrary: FakeMediaLibrary(
+        accessResult: MediaAccessResult.full,
+        assets: [ResolvedAsset(id: 'id-a', file: XFile('a.jpg'), sizeBytes: 3)],
+      ),
+      httpClient: MockClient((request) async => fail('nothing to upload')),
+      uploadedAssets: FakeUploadedAssetsStore({'id-a'}),
+    );
+
+    await tester.tap(find.text('Upload All Photos & Videos'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Everything on this device is already uploaded.'),
+      findsOneWidget,
+    );
+  });
 }

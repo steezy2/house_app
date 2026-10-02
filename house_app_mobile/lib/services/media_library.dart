@@ -3,8 +3,14 @@ import 'package:photo_manager/photo_manager.dart';
 
 /// A photo/video asset resolved to a real file on disk, ready to upload.
 class ResolvedAsset {
-  const ResolvedAsset({required this.file, required this.sizeBytes});
+  const ResolvedAsset({
+    required this.id,
+    required this.file,
+    required this.sizeBytes,
+  });
 
+  /// `photo_manager`'s stable per-device asset id.
+  final String id;
   final XFile file;
   final int sizeBytes;
 }
@@ -47,7 +53,11 @@ class MediaLibrary {
   /// only the user-picked subset if it returned
   /// [MediaAccessResult.limited]), resolved to real files with their
   /// sizes. Newest first, matching `photo_manager`'s default ordering.
-  Future<List<ResolvedAsset>> getAllAssets() async {
+  /// Assets whose id is in [exclude] are skipped before their file is
+  /// resolved, which on iOS can mean downloading it from iCloud.
+  Future<List<ResolvedAsset>> getAllAssets({
+    Set<String> exclude = const {},
+  }) async {
     final albums = await PhotoManager.getAssetPathList(
       type: RequestType.common,
       onlyAll: true,
@@ -62,10 +72,14 @@ class MediaLibrary {
 
     final resolved = <ResolvedAsset>[];
     for (final asset in assets) {
+      if (exclude.contains(asset.id)) continue;
       final file = await asset.originFile;
-      if (file == null) continue; // e.g. an iCloud-only asset that failed to download
+      // e.g. an iCloud-only asset that failed to download
+      if (file == null) continue;
       final size = await file.length();
-      resolved.add(ResolvedAsset(file: XFile(file.path), sizeBytes: size));
+      resolved.add(
+        ResolvedAsset(id: asset.id, file: XFile(file.path), sizeBytes: size),
+      );
     }
     return resolved;
   }
