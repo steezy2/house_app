@@ -94,3 +94,23 @@ func TestLocalDestination_Copy_MissingSourceFile(t *testing.T) {
 		t.Error("expected an error when the source file doesn't exist")
 	}
 }
+
+func TestLocalDestination_Copy_FailedCopyLeavesNoPartialFile(t *testing.T) {
+	destBase := t.TempDir()
+	d := NewLocalDestination(destBase)
+
+	// A directory opens fine but fails on read, standing in for a source
+	// or drive that errors partway through the copy.
+	err := d.Copy(context.Background(), "photo.jpg", t.TempDir())
+	if err == nil {
+		t.Fatal("expected an error when the source can't be read")
+	}
+
+	entries, err := os.ReadDir(destBase)
+	if err != nil {
+		t.Fatalf("failed to read destination dir: %v", err)
+	}
+	for _, e := range entries {
+		t.Errorf("failed copy left %q behind in the destination", e.Name())
+	}
+}

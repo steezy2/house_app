@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2026-10-02
+
+### Fixed
+- **Local backups can't record a truncated copy as backed up.**
+  `backup.LocalDestination.Copy` now writes to a temp file, syncs and
+  closes it with errors checked, then renames it into place. Before, a
+  write error that only surfaced on close (common on network drives) was
+  ignored, and a failed copy left a partial file at the destination, so
+  `Image.BackedUpTo` could list a destination that didn't hold a good copy.
+
 ## 2026-09-23
 
 ### Added
